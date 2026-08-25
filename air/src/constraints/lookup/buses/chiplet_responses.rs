@@ -177,7 +177,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     kind,
                                     addr,
                                     node_index,
-                                    payload: HasherPayload::Word(word),
+                                    payload: HasherPayload::MerkleWord { direction_bit: bit, word },
                                 }
                             },
                             Deg { v: 5, u: 7 },

@@ -141,6 +141,59 @@ The above constraint enforces that the specified input and output controller row
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
 
+## Merkle range checks
+
+`MPVERIFY` and `MRUPDATE` request 16-bit range checks for $d$ and
+$1024(d - 1)$. Together, the checks accept exactly $1 \le d \le 64$.
+
+The path bits must also describe the canonical integer represented by the node-index field
+element. At each controller row, the hash controller enforces
+
+$$
+i_k = 2i_{k+1} + b_k
+$$
+
+where $b_k$ is a boolean direction bit. This is a field equality modulo
+$Q = 2^{64} - 2^{32} + 1$. By itself, it does not distinguish an integer
+index from that index plus $Q$.
+
+The stack/hasher lookup addresses bind the computation to exactly $d$ levels, and the controller
+ends with $i_d = 0$. To prevent a wrapped 64-bit bit string from representing the same field
+element, `CoreAir` uses the six decoder helpers
+
+```text
+[addr, b, y0, y1, y2, y3]
+```
+
+on each `MPVERIFY` and `MRUPDATE` row. Here $b$ is the first direction bit and
+
+$$
+y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3.
+$$
+
+For the stack node index $n$, Core enforces $b$ to be boolean and constrains
+
+$$
+n + b + 2y = Q - 1.
+$$
+
+The typed Merkle-init request carries $b$. Its matching controller response derives the first bit
+as $i_0 - 2i_1$, so the lookup binds the Core helper to the actual path direction. The `RangeCheck`
+bus checks all four limbs and also checks $2y_3$. The limb checks give $y_j < 2^{16}$, and the
+additional check gives $y_3 < 2^{15}$, hence $0 \le y < 2^{63}$. Together with the equation and the
+controller binding of $b$, this rules out the non-canonical depth-64 alias.
+
+All seven Merkle range requests are emitted from existing Core lookup columns:
+
+- the stack-overflow column checks $y_0$, $y_1$, and $y_2$ for both operations;
+- for `MPVERIFY`, the chiplet-request column checks $y_3$, while the
+  block-stack/range/log-deferred column checks $d$, $1024(d - 1)$, and $2y_3$;
+- for `MRUPDATE`, the block-stack/range/log-deferred column checks $d$, $1024(d - 1)$, $y_3$, and
+  $2y_3$.
+
+The execution tracer replays the corresponding requests into the fixed And8 range-table
+multiplicities. No canonical-index witness is stored in the native hash controller.
+
 ## CRYPTOSTREAM
 
 `CRYPTOSTREAM` encrypts two words from memory using one BlakeG-XOF counter block. Its stack

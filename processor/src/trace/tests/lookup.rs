@@ -18,11 +18,12 @@
 //! The oracle cross-check in (4) subsumes the "does it run to completion?" shape of a
 //! separate plumbing test, so both live in one function below.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 use std::collections::HashMap;
 
 use miden_air::{
-    BaseAir, LiftedAir, MidenAir,
+    BaseAir, LiftedAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config,
+    debug,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
         Challenges, LookupFractions, accumulate, build_lookup_fractions,
@@ -66,6 +67,7 @@ const CONTROLLER_S0_COL: usize = CONTROLLER_BASE_COL;
 const CONTROLLER_S2_COL: usize = CONTROLLER_BASE_COL + 2;
 const CONTROLLER_IS_START_COL: usize = CONTROLLER_ROW_DATA_BASE_COL + 2;
 const CONTROLLER_MERKLE_OR_PADDING_COL: usize = CHIPLETS_MODE_COL;
+static PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Pad/Add/Mul/Drop inside a span - same kind of ops the decoder/stack tests use, with
 /// enough variety to exercise decoder, stack, and range-check bus emitters.
@@ -821,6 +823,37 @@ fn merkle_start_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
 fn mutate_chip_cell(chip_matrix: &mut RowMajorMatrix<Felt>, row: usize, col: usize, delta: Felt) {
     let width = chip_matrix.width();
     chip_matrix.values[row * width + col] += delta;
+}
+
+/// Asserts that caller-supplied Eidos per-AIR matrices violate at least one AIR constraint.
+///
+/// This keeps mutation tests on the same four-AIR statement and transcript configuration as the
+/// production prover. The panic hook is temporarily suppressed because the debug checker reports
+/// the first violated constraint by panicking.
+pub(super) fn assert_trace_constraints_reject(
+    trace: &VmTrace,
+    core_matrix: RowMajorMatrix<Felt>,
+    chip_matrix: RowMajorMatrix<Felt>,
+    blakeg_matrix: RowMajorMatrix<Felt>,
+    and8_matrix: RowMajorMatrix<Felt>,
+) {
+    let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
+    let statement =
+        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .expect("valid statement inputs");
+    let prover_statement =
+        ProverStatement::new(statement, vec![core_matrix, chip_matrix, blakeg_matrix, and8_matrix])
+            .expect("valid trace shapes");
+
+    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
+    let panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        debug::check_constraints(&prover_statement, config.challenger());
+    }));
+    std::panic::set_hook(panic_hook);
+    assert!(result.is_err(), "mutated trace should violate AIR constraints");
 }
 
 #[test]

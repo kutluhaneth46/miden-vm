@@ -1,4 +1,5 @@
 //! Behavioral oracle for the PVM out-of-domain row hook.
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 use miden_core::{
     Felt, Word,
@@ -103,7 +104,9 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
 
     let alpha = QuadFelt::new(ALPHA.map(Felt::new_unchecked));
     let expected_acc = row
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|coords| QuadFelt::new([coords[0], coords[1]]))
         .fold(QuadFelt::new(INITIAL_ACC.map(Felt::new_unchecked)), |acc, coefficient| {
             coefficient + alpha * acc
@@ -114,9 +117,11 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
 
     let initial_cv_limbs: [u64; 4] = INITIAL_SPONGE[8..].try_into().expect("four-felt CV");
     let initial_cv = Word::new(initial_cv_limbs.map(Felt::new_unchecked));
-    let expected_cv = row.chunks_exact(8).fold(initial_cv, |cv, block| {
-        Eidos::compress_block(cv, block.try_into().expect("eight-felt OOD block"))
-    });
+    let expected_cv = row
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .fold(initial_cv, |cv, block| Eidos::compress_block(cv, *block));
     for (i, expected) in expected_cv.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, RESULT_PTR + 8 + i as u32),

@@ -181,8 +181,8 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} memory={:6.3}",
-            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.memory,
+            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3}",
+            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.chiplets, cost.memory,
         );
     }
 
@@ -259,7 +259,7 @@ fn bench_one_scenario(
     );
     if snapshot.shape.substituted_rows() > 0 {
         println!(
-            "    note:    {} rows (ace={} + kernel_rom={}) folded into memory target",
+            "    note:    {} rows (ace={} + kernel_rom={}) combined with advisory memory rows",
             snapshot.shape.substituted_rows(),
             snapshot.shape.ace_rows,
             snapshot.shape.kernel_rom_rows,

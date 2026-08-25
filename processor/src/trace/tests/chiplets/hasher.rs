@@ -442,13 +442,17 @@ fn mpverify_hasher_bus() {
             continue;
         }
         let helper0 = main.helper_register(0, idx);
+        let direction_bit = main.helper_register(1, idx);
         let mp_depth = main.stack_element(4, idx);
         let mp_index = main.stack_element(5, idx);
         let leaf_word: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, idx));
         let old_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(6 + i, idx));
 
         let return_addr = helper0 + mp_depth * CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
-        exp.remove(row, &HasherMsg::merkle_verify_init(helper0, mp_index, leaf_word));
+        exp.remove(
+            row,
+            &HasherMsg::merkle_verify_init(helper0, mp_index, direction_bit, leaf_word),
+        );
         exp.remove(row, &HasherMsg::return_hash(return_addr, old_root));
         request_count += 2;
     }
@@ -466,7 +470,10 @@ fn mpverify_hasher_bus() {
                 // Match the emitter's own `bit = node_index - 2 * node_index_next` formula.
                 let bit = merkle_direction_bit(main, idx);
                 let word: [Felt; 4] = if bit == ZERO { rate_0 } else { rate_1 };
-                exp.add(usize::from(idx), &HasherMsg::merkle_verify_init(addr, node_index, word));
+                exp.add(
+                    usize::from(idx),
+                    &HasherMsg::merkle_verify_init(addr, node_index, bit, word),
+                );
                 mp_input_count += 1;
             },
             HasherResponseKind::ReturnHash => {
@@ -518,6 +525,7 @@ fn mrupdate_hasher_bus() {
             continue;
         }
         let helper0 = main.helper_register(0, idx);
+        let direction_bit = main.helper_register(1, idx);
         let next = RowIndex::from(row + 1);
         let mr_depth = main.stack_element(4, idx);
         let mr_index = main.stack_element(5, idx);
@@ -532,9 +540,9 @@ fn mrupdate_hasher_bus() {
             + mr_depth * (CONTROLLER_ROWS_PER_HASHER_OP_FELT + CONTROLLER_ROWS_PER_HASHER_OP_FELT)
             - ONE;
 
-        exp.remove(row, &HasherMsg::merkle_old_init(helper0, mr_index, old_leaf));
+        exp.remove(row, &HasherMsg::merkle_old_init(helper0, mr_index, direction_bit, old_leaf));
         exp.remove(row, &HasherMsg::return_hash(old_return, old_root));
-        exp.remove(row, &HasherMsg::merkle_new_init(new_init, mr_index, new_leaf));
+        exp.remove(row, &HasherMsg::merkle_new_init(new_init, mr_index, direction_bit, new_leaf));
         exp.remove(row, &HasherMsg::return_hash(new_return, new_root));
         request_count += 4;
     }
@@ -553,11 +561,11 @@ fn mrupdate_hasher_bus() {
 
         match kind {
             HasherResponseKind::MvOldInput => {
-                exp.add(usize::from(idx), &HasherMsg::merkle_old_init(addr, node_index, word));
+                exp.add(usize::from(idx), &HasherMsg::merkle_old_init(addr, node_index, bit, word));
                 mv_count += 1;
             },
             HasherResponseKind::MuNewInput => {
-                exp.add(usize::from(idx), &HasherMsg::merkle_new_init(addr, node_index, word));
+                exp.add(usize::from(idx), &HasherMsg::merkle_new_init(addr, node_index, bit, word));
                 mu_count += 1;
             },
             HasherResponseKind::ReturnHash => {

@@ -46,9 +46,9 @@ impl RangeChecker {
 
     /// Adds a batch of range-check requests.
     pub fn add_range_checks(&mut self, values: &[u16]) {
-        // Stack u32 operations request four helper limbs. Memory uses this helper for the two
-        // sorted-access delta limbs and records address-decomposition checks separately.
-        debug_assert!(values.len() == 2 || values.len() == 4);
+        // Callers provide two Merkle-depth, U32DIV, or memory-delta values; four u32 helper
+        // values; or five Merkle-index witness values.
+        debug_assert!(matches!(values.len(), 2 | 4 | 5));
 
         for value in values.iter() {
             self.add_value(*value);

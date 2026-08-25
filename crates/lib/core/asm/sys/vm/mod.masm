@@ -8,11 +8,17 @@ pub mod public_inputs
 
 use miden::core::mem
 use miden::core::stark::utils
-use miden::core::stark::verifier
 use miden::core::stark::constants
+use miden::core::stark::verifier
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
+
+# Domain tag for the kernel commitment: the registered selector
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+const KERNEL_DOMAIN_TAG = 0x01000001
 
 const FELTS_PER_KERNEL_DIGEST = 4
 
@@ -23,16 +29,16 @@ const NUM_MIDEN_AIRS = 4
 const AND8_LOOKUP_LOG_HEIGHT = 16
 
 # RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_REGISTRY_ROOT]).
-const RELATION_DIGEST_0 = 6085593065978036964
-const RELATION_DIGEST_1 = 7212073305481664301
-const RELATION_DIGEST_2 = 2989720366759326989
-const RELATION_DIGEST_3 = 389645426008370682
+const RELATION_DIGEST_0 = 5535122973968505019
+const RELATION_DIGEST_1 = 2191281614056752429
+const RELATION_DIGEST_2 = 7259568996620287914
+const RELATION_DIGEST_3 = 7624256173240983865
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 2078869771764824980
-const ACE_REGISTRY_ROOT_1 = 4160966774314910088
-const ACE_REGISTRY_ROOT_2 = 9077256358338390640
-const ACE_REGISTRY_ROOT_3 = 6996311455434810260
+const ACE_REGISTRY_ROOT_0 = 1292718669066434664
+const ACE_REGISTRY_ROOT_1 = 4058421574207343309
+const ACE_REGISTRY_ROOT_2 = 3034002641501839260
+const ACE_REGISTRY_ROOT_3 = 2179497026471637018
 
 # Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
 const AND8_PREPROCESSED_TRACE_COM_0 = 8101824786889297799
@@ -238,15 +244,16 @@ proc materialize_kernel_witness
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.layout::kernel_witness_ptr swap
-    exec.mem::pipe_words_to_memory
-    # The pipe computes an untagged hash; discard it and check the domain-tagged commitment below.
-    dropw dropw dropw drop
+    dup exec.layout::num_kernel_procedures_ptr mem_store
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.layout::num_kernel_procedures_ptr mem_store
-    exec.layout::kernel_witness_ptr
-    exec.claim::kernel_commitment
+    exec.layout::kernel_witness_ptr swap
+    push.KERNEL_DOMAIN_TAG
+    exec.mem::pipe_words_to_memory_in_domain
+    # => [K', end_ptr, K, ...]
+
+    # Discard the end pointer, then authenticate the copied witness.
+    movup.4 drop
     # => [K', K, ...]
     assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
     # => [...]

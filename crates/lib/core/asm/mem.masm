@@ -162,6 +162,36 @@ pub proc pipe_double_words_to_memory
   # [R0', R1', C', write_ptr', ...]
 end
 
+# Absorbs the even-word prefix and, when present, one final padded word into Eidos.
+#
+# Inputs:  [CV, write_ptr, end_ptr, needs_padding]
+# Outputs: [R0, R1, C', write_ptr']
+proc pipe_words_to_memory_with_capacity
+  # Set the initial rate to zero and absorb all complete rate blocks.
+  padw padw
+  exec.pipe_double_words_to_memory
+  # => [R0, R1, C', write_ptr, needs_padding, ...]
+
+  movup.13
+  # => [needs_padding, R0, R1, C', write_ptr, ...]
+
+  if.true
+    # Eidos uses overwrite mode. Replace the rate with the final word and zero padding.
+    swapw dropw
+    adv_loadw
+    # => [R0', C', write_ptr, ...]
+
+    # Store the final word and advance write_ptr.
+    movup.8 dup add.4 movdn.5
+    mem_storew_le
+    movup.4 movdn.8
+    # => [R0', C', write_ptr+4, ...]
+
+    padw swapw exec.eidos::compress
+    # => [R0'', R1', C'', write_ptr+4, ...]
+  end
+end
+
 #! Copies an arbitrary number of words from the advice stack to memory, updating the Eidos state.
 #!
 #! Inputs:  [num_words, write_ptr]
@@ -188,46 +218,52 @@ pub proc pipe_words_to_memory
   movup.2 exec.eidos::init_chaining_word
   # => [C, write_ptr, end_ptr, needs_padding, ...]
 
-  # set initial hasher state
-  padw padw
-  # => [R0, R1, C, write_ptr, end_ptr, needs_padding, ...]
+  exec.pipe_words_to_memory_with_capacity
+end
 
-  exec.pipe_double_words_to_memory
-  # => [R0, R1, C, write_ptr, needs_padding, ...]
-
-  movup.13
-  # => [needs_padding, R0, R1, C, write_ptr, ...]
-
-  # if(needs_padding)
+#! Copies advice words to memory while computing their domain-tagged hash.
+#!
+#! Inputs:  [domain, num_words, write_ptr]
+#! Outputs: [DIGEST, write_ptr']
+#!
+#! Where:
+#! - domain identifies the Eidos hash domain.
+#! - num_words is the number of words copied from the advice stack.
+#! - write_ptr is the word-aligned destination address.
+#! - write_ptr' points immediately after the copied words.
+#! - DIGEST matches `Eidos::hash_elements_in_domain` over the copied felts.
+pub proc pipe_words_to_memory_in_domain
+  # Empty input has a distinct encoding under a nonzero domain. Reuse the canonical memory-based
+  # implementation; it does not read memory when num_elements is zero.
+  dup.1 eq.0
   if.true
-    # The VM hasher uses overwrite mode, so the first rate word stays on stack.
-    swapw dropw
-    # => [R0, C, write_ptr, ...]
+    swap drop dup.1 push.0 swap
+    # => [write_ptr, num_elements=0, domain, write_ptr, ...]
+    exec.eidos::hash_elements_in_domain
+    # => [DIGEST, write_ptr, ...]
+  else
+    # Keep the domain below the word count while deriving the even-word prefix.
+    movdn.2
+    # => [num_words, write_ptr, domain, ...]
 
-    # Overwrite R0 with new data from advice stack.
-    adv_loadw
-    # => [R0', C, write_ptr, ...]
+    dup is_odd
+    dup movdn.4
+    # => [is_odd, num_words, write_ptr, domain, needs_padding, ...]
 
-    # - get the memory address that R0' should be saved to
-    # - update the write_ptr to point to the next address
-    movup.8 dup.0 add.4 movdn.5
-    # => [write_ptr, R0', write_ptr+4, C, ...]
+    sub mul.4 dup.1 add swap
+    # => [write_ptr, end_ptr, domain, needs_padding, ...]
 
-    # save data to memory
-    mem_storew_le
-    # => [R0', write_ptr+4, C, ...]
+    # Build Eidos::init_chaining_word(domain, num_felts), where
+    # num_felts = end_ptr - write_ptr + needs_padding * 4.
+    dup.1 dup.1 sub
+    dup.4 mul.4 add
+    movup.3 swap
+    exec.eidos::init_chaining_word_in_domain
+    # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
-    # Fix write_ptr position.
-    movup.4 movdn.8
-    # => [R0', C, write_ptr+4, ...]
-
-    # Push padding word.
-    padw swapw
-    # => [R0', R1, C, write_ptr+4, ...]
-
-    # Run one VM hasher compression step.
-    exec.eidos::compress
-    # => [R0'', R1', C', write_ptr+4, ...]
+    exec.pipe_words_to_memory_with_capacity
+    exec.eidos::digest
+    # => [DIGEST, write_ptr', ...]
   end
 end
 

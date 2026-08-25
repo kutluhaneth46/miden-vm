@@ -5,6 +5,7 @@ use miden_core::Felt;
 use miden_processor::ProcessorState;
 
 pub mod debug;
+pub mod ecdsa_k256_keccak;
 pub mod falcon_div;
 pub mod precompiles;
 pub mod readonly;

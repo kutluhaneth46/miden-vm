@@ -90,10 +90,18 @@ The controller AIR enforces:
 - `op_final` booleanity and valid start/continuation sequencing;
 - chaining-value continuity between consecutive blocks of one sequential hash;
 - Merkle index decomposition and direction-bit booleanity;
+- continuity of the shifted Merkle index across non-final controller rows;
 - routing the current Merkle digest into the correct half of the next block;
 - termination of a Merkle path at index zero;
 - one `mrupdate_id` shared by the old and new legs of an update, with distinct IDs for distinct
   updates.
+
+For the first row of a Merkle path, the controller derives the direction bit as
+`node_index - 2 * node_index_next` and includes it in the typed Merkle-init message. The matching
+Core-side request includes stack helper `b`, so the lookup binds `b` to the controller-derived bit.
+`CoreAir` enforces the canonical-index equation and emits its range checks; the controller does not
+store a canonical-index witness. See
+[Merkle range checks](../stack/crypto_ops.md#merkle-range-checks).
 
 Only controller rows expose ordinary hasher semantics to the decoder and stack. The wide AIR is an
 internal computation provider connected by lookup arguments.
@@ -107,6 +115,10 @@ physical compression:
 | ---- | ---- |
 | 0–27 | Seven BlakeG rounds, represented as 28 fused G-function rows |
 | 28–31 | Footer rows assembling the message, input chaining value, digest, XOF lanes, and external relations |
+
+This is the MVM layout. The PVM has an independent Eidos transcript AIR: it uses the same
+108-column BlakeG compression layout plus 20 transcript/interface columns, for 128 main columns
+and 20 auxiliary columns in total.
 
 Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
 each footer row. The fused rows prove u32 additions, XOR witnesses, and rotations. Their input
@@ -195,14 +207,20 @@ verifier selects the corresponding generated constraint circuit by the proof-ord
 
 ## Implementation map
 
+- `air/src/constraints/chiplets/selectors.rs`
+  Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
 - `air/src/constraints/chiplets/hasher_control/`
-  Single-row controller lifecycle, sequential-hash continuity, and Merkle routing.
+  Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
+  routing.
+- `air/src/constraints/chiplets/hasher_control/flags.rs`
+  Named row-kind flags derived from the controller-internal selectors.
 - `air/src/constraints/blakeg_compression/`
   32-row layout, schedule, selectors, constraints, lookup plan, and trace writer.
 - `air/src/constraints/and8_lookup/`
   Fixed byte-table AIR used by BlakeG and AEAD stream XORs.
 - `air/src/constraints/lookup/buses/chiplet_requests.rs`
-  Decoder/stack requests for native hashing, Merkle operations, AEAD stream, and deferred logging.
+  Decoder/stack requests for native hashing, Merkle operations, canonical-index range checks, AEAD
+  stream, and deferred logging.
 - `air/src/constraints/lookup/buses/chiplet_responses.rs`
   Controller, bytewise, memory, ACE, and kernel-ROM provider messages.
 - `air/src/constraints/lookup/buses/wiring.rs`

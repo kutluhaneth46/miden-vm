@@ -25,7 +25,9 @@ pub enum Component {
     /// System + decoder + stack.
     Core,
     Hasher,
-    Bitwise,
+    /// Total chiplets trace. The bitwise snippet is the adjustable filler for this hard bracket.
+    Chiplets,
+    /// Advisory memory composition.
     Memory,
 }
 
@@ -58,7 +60,7 @@ pub const SNIPPETS: &[Snippet] = &[
         setup: "push.1 neg",
         body: "u32split u32xor",
         cleanup: "drop",
-        dominant: Component::Bitwise,
+        dominant: Component::Chiplets,
     },
     Snippet {
         name: "memory",
@@ -134,7 +136,7 @@ mod tests {
 
     #[test]
     fn catalog_has_one_snippet_per_solver_component() {
-        let targets = [Component::Core, Component::Hasher, Component::Bitwise, Component::Memory];
+        let targets = [Component::Core, Component::Hasher, Component::Chiplets, Component::Memory];
         for target in targets {
             let count = SNIPPETS.iter().filter(|s| s.dominant == target).count();
             assert_eq!(count, 1, "expected exactly one snippet for {target:?}");

@@ -273,8 +273,8 @@ where
 
 /// Absorb whole rate blocks into an initialized Eidos chaining word.
 fn absorb_rate_blocks(state: &mut Word, elements: &[Felt]) {
-    // `chunks_exact` would silently drop a trailing partial block, yielding a wrong digest;
-    // assert rather than debug_assert so a miscount cannot survive a release build.
+    // Ignoring a trailing partial block would yield a wrong digest; assert rather than
+    // debug_assert so a miscount cannot survive a release build.
     assert!(
         elements.len().is_multiple_of(RATE),
         "sponge absorption requires whole rate blocks"

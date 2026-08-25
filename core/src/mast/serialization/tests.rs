@@ -21,7 +21,7 @@ use crate::{
 };
 
 struct TestLogger {
-    messages: Mutex<Vec<(ThreadId, String)>>,
+    messages: Mutex<Vec<(ThreadId, log::Level, String)>>,
 }
 
 impl log::Log for TestLogger {
@@ -31,10 +31,11 @@ impl log::Log for TestLogger {
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            self.messages
-                .lock()
-                .unwrap()
-                .push((thread::current().id(), record.args().to_string()));
+            self.messages.lock().unwrap().push((
+                thread::current().id(),
+                record.level(),
+                record.args().to_string(),
+            ));
         }
     }
 
@@ -45,11 +46,14 @@ static TEST_LOGGER: TestLogger = TestLogger { messages: Mutex::new(Vec::new()) }
 static TEST_LOGGER_INIT: Once = Once::new();
 static TEST_LOGGER_GUARD: Mutex<()> = Mutex::new(());
 
-fn with_captured_error_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
-    with_captured_logs(log::LevelFilter::Error, f)
+fn with_captured_warn_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<(log::Level, String)>) {
+    with_captured_logs(log::LevelFilter::Warn, f)
 }
 
-fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, Vec<String>) {
+fn with_captured_logs<T>(
+    level: log::LevelFilter,
+    f: impl FnOnce() -> T,
+) -> (T, Vec<(log::Level, String)>) {
     TEST_LOGGER_INIT.call_once(|| {
         log::set_logger(&TEST_LOGGER).expect("test logger should be installed once");
     });
@@ -64,8 +68,8 @@ fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, 
         .lock()
         .unwrap()
         .iter()
-        .filter(|(thread_id, _)| *thread_id == current_thread)
-        .map(|(_, message)| message.clone())
+        .filter(|(thread_id, ..)| *thread_id == current_thread)
+        .map(|(_, level, message)| (*level, message.clone()))
         .collect();
     (result, messages)
 }
@@ -1770,12 +1774,14 @@ fn assert_untrusted_overspec_logging(
     expected_nodes: u32,
     expected_log_fragments: &[&str],
 ) {
-    let (result, logs) = with_captured_error_logs(|| UntrustedMastForest::read_from_bytes(bytes));
+    let (result, logs) = with_captured_warn_logs(|| UntrustedMastForest::read_from_bytes(bytes));
 
     let untrusted = result.unwrap();
     assert_eq!(logs.len(), expected_log_fragments.len());
     for expected in expected_log_fragments {
-        assert!(logs.iter().any(|msg| msg.contains(expected)));
+        assert!(logs.iter().any(|(level, msg)| {
+            *level == log::Level::Warn && msg.contains(expected) && msg.contains("input at ")
+        }));
     }
     assert_eq!(untrusted.validate().unwrap().num_nodes(), expected_nodes);
 
@@ -1805,6 +1811,52 @@ fn test_untrusted_overspecification_logging_matches_wire_mode() {
 
     let bytes = forest.to_bytes();
     assert_untrusted_overspec_logging(&bytes, forest.num_nodes(), &["wire node hashes"]);
+}
+
+#[test]
+fn test_untrusted_overspecification_logging_tracks_trait_call_site() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let mut reader = SliceReader::new(&bytes);
+    let expected_line = line!() + 2;
+    let (result, logs) =
+        with_captured_warn_logs(|| <UntrustedMastForest as Deserializable>::read_from(&mut reader));
+
+    result.unwrap();
+    let expected_location = format!("{}:{expected_line}:", file!());
+    assert!(logs.iter().any(|(level, msg)| {
+        *level == log::Level::Warn
+            && msg.contains("wire node hashes")
+            && msg.contains(&expected_location)
+    }));
+}
+
+#[test]
+fn test_untrusted_overspecification_logging_tracks_trait_bytes_call_site() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let expected_line = line!() + 2;
+    let (result, logs) = with_captured_warn_logs(|| {
+        <UntrustedMastForest as Deserializable>::read_from_bytes(&bytes)
+    });
+
+    result.unwrap();
+    let expected_location = format!("{}:{expected_line}:", file!());
+    assert!(logs.iter().any(|(level, msg)| {
+        *level == log::Level::Warn
+            && msg.contains("wire node hashes")
+            && msg.contains(&expected_location)
+    }));
 }
 
 /// Test that untrusted validation in hashless mode recomputes non-external digests without any

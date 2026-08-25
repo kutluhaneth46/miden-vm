@@ -34,6 +34,7 @@ use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
+    primitives::byte_pair_lut,
     session::{
         BytePairAnd8Air, NUM_CHIPLETS, SessionTraces, fixed_ecgroup_msgs, fixed_uintval_msgs,
     },
@@ -106,6 +107,18 @@ impl ChipletAir {
             ChipletAir::EcGroupAdd,
             ChipletAir::EcMsm,
         ]
+    }
+
+    /// The fixed log2 trace height of this instance, if the relation pins one.
+    ///
+    /// `BytePairAnd8` commits its main and preprocessed traces at
+    /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
+    /// every other instance ranges above its derived minimum.
+    pub fn fixed_log_height(&self) -> Option<u32> {
+        match self {
+            ChipletAir::BytePairAnd8 => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
+            _ => None,
+        }
     }
 }
 

@@ -4,11 +4,17 @@ Criterion benchmark that reproduces the **proving-cost brackets** of a real
 workload from a small JSON snapshot, without depending on any
 producer-side runtime code.
 
-> **Current snapshot status:** `snapshots/bench-tx.json` is marked
+> **Current snapshot status:** the executable `snapshots/bench-tx.json` is marked
 > `derived_pending_producer_port`. It is a provisional Eidos calibration target derived from a
 > pre-Eidos producer capture, not a transaction measurement from the current VM. Benchmark output
 > repeats this warning for every derived scenario. Do not publish its timings as measured Eidos
 > transaction performance.
+>
+> The exact 43-scenario Poseidon2 producer artifact from `next` is preserved at
+> `snapshots/poseidon2-source/bench-tx.json`. It includes the six explicit Falcon/ECDSA P2ID keys,
+> but it is source evidence only: the default benchmark glob does not descend into that directory,
+> and the Eidos loader rejects its Poseidon2 trace schema. There is no sound field-wise conversion
+> from those rows to Eidos rows.
 
 ## Approach
 
@@ -20,7 +26,7 @@ brackets are known.
 This crate takes a snapshot of per-segment trace-row counts supplied by
 an external producer (e.g. `protocol/bin/bench-transaction/`'s
 `bench-tx.json`), generates a tiny MASM program whose execution
-reproduces those brackets, and runs `execute` + `execute_and_prove`
+reproduces those brackets, and runs execution, trace-preparation, proving, and verification
 Criterion groups against it. The result is a VM-level regression detector
 that isolates *prover* changes from *workload* changes without depending
 on the producer's machinery.
@@ -45,7 +51,7 @@ stale calibration constants checked into the repo.
    tomorrow's iteration count grows to compensate, and the target
    bracket is still hit.
 
-For each scenario in every producer file under `snapshots/` (or the
+For each scenario in every top-level Eidos file under `snapshots/` (or the
 single file in `SYNTH_SNAPSHOT`):
 
 2. **Load scenario** -- read the target row counts from the producer's
@@ -80,8 +86,8 @@ Four patterns cover every dynamic component the solver targets:
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
 | `hasher`      | `bcompress`                                  | BlakeG compression work      |
-| `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
-| `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |
+| `bitwise`     | `u32split u32xor`                            | total chiplets bracket        |
+| `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | advisory memory composition |
 | `decoder_pad` | `swap dup.1 add`                             | core (decoder + stack)        |
 
 `memory` advances its word-aligned address by 262148 so each iteration
@@ -95,18 +101,16 @@ The solver has no snippets targeting the ACE or kernel-ROM chiplets.
   READ section -- more setup than the other snippets warrant, and not
   currently done here.
 - **Kernel-ROM** rows are a small, near-constant contribution in
-  practice, so we simplify by folding them into the memory target
-  rather than driving them directly.
+  practice, so a dedicated driver would add complexity without
+  materially improving the profile.
 
-Since snapshots still carry row counts for both, they're **folded into
-the memory target** -- growing memory ops preserves the overall
-chiplet-trace length and therefore the chiplet bracket.
-
-One producer-side caveat: the consumer can measure `ace_chiplet_len()`
-when it runs synthetic programs, but a producer pinned to an older
-`miden-processor` may report `ace_rows: 0` until that dependency
-exposes the accessor. Treat zero ACE rows in a snapshot as a producer
-visibility limitation, not as proof that the VM emitted no ACE rows.
+Instead of trying to reproduce every chiplet subtype, the bitwise
+snippet acts as the efficient adjustable filler for the authoritative
+total-chiplets target. The memory snippet keeps the advisory memory mix
+representative; bitwise, ACE, and kernel-ROM composition is reported for
+visibility but is not a hard constraint. This preserves the total
+chiplets proving bracket while the separate BlakeG target preserves
+native-hash work.
 
 ## Snapshot format
 
@@ -127,17 +131,17 @@ former `range_rows` key is accepted as a bracket-only alias for
 ```json
 {
   "consume single P2ID note": {
-    "provenance": "producer_measured",
+    "provenance": "derived_pending_producer_port",
     "trace": {
-      "core_rows": 77699,
-      "chiplets_rows": 6538,
-      "blakeg_compression_rows": 120352,
+      "core_rows": 77683,
+      "chiplets_rows": 6537,
+      "blakeg_compression_rows": 120384,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
-        "hasher_rows": 3761,
+        "hasher_rows": 3762,
         "bitwise_rows": 416,
-        "memory_rows": 2297,
-        "kernel_rom_rows": 63,
+        "memory_rows": 2294,
+        "kernel_rom_rows": 64,
         "ace_rows": 0
       }
     }
@@ -145,11 +149,17 @@ former `range_rows` key is accepted as a bracket-only alias for
 }
 ```
 
-Snapshots live in `snapshots/`. The bench loads every `*.json` file in
-that directory and runs one Criterion group per `(producer_file,
+Executable Eidos snapshots live directly in `snapshots/`. The bench loads every top-level
+`*.json` file in that directory (non-recursively) and runs one Criterion group per `(producer_file,
 scenario_key)` pair, named `<producer-stem>/<scenario-slug>`. See the
 [Running](#running) section below for `SYNTH_SNAPSHOT` /
 `SYNTH_SCENARIO` filters.
+
+Poseidon2 producer artifacts live below `snapshots/poseidon2-source/`. They retain upstream
+scenario and schema coverage, including the explicit
+`... with Falcon signing` / `... with ECDSA signing` fixture keys, without pretending that the
+captured Poseidon2 rows are Eidos measurements. They are intentionally outside the default glob
+and cannot be passed to `SYNTH_SNAPSHOT` as executable Eidos targets.
 
 There is no schema-version field; the on-disk shape and provenance marker are the contract.
 If the producer changes that shape, the loader fails loudly (serde
@@ -189,10 +199,9 @@ Eidos snapshots must therefore provide `blakeg_compression_rows` explicitly.
 `core_rows`, `chiplets_rows`, `blakeg_compression_rows`, and
 `byte_pair_lookup_rows` are
 compared against the targets within a 2% band. A drift inside that band
-is harmless for proving cost (same bracket either way), so the bench
-only reports it. A drift that *crosses* a bracket is already caught by
-the hard tier above, so this tier exists purely to surface in-bracket
-near-misses worth noticing.
+usually leaves the proving bracket unchanged, so the bench only reports
+it. A drift that *crosses* a bracket is always caught by the hard tier
+above; this tier exists to surface raw-count near-misses worth noticing.
 
 ### Info -- no judgement
 
@@ -215,8 +224,9 @@ VM:
 2. Confirm every scenario contains current `core_rows`, `chiplets_rows`,
    `blakeg_compression_rows`, and `byte_pair_lookup_rows` values, and mark its provenance
    `producer_measured`.
-3. Copy `bin/bench-transaction/bench-tx.json` over
-   `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`.
+3. Copy the Eidos producer output over
+   `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`. Do not derive it from
+   `snapshots/poseidon2-source/bench-tx.json`.
 4. Replace the provisional bracket table in `src/snapshot.rs` with expectations derived from the
    measured file.
 5. Run `cargo bench -p miden-vm-synthetic-bench` and verify
@@ -236,12 +246,17 @@ cargo bench -p miden-vm-synthetic-bench
 
 Env vars:
 
-- `SYNTH_SNAPSHOT=<path>` -- bench only the specified producer JSON
-  (instead of iterating over every `snapshots/*.json`).
+- `SYNTH_SNAPSHOT=<path>` -- bench only the specified **Eidos** producer JSON
+  (instead of iterating over every top-level `snapshots/*.json`). Poseidon2 source artifacts are
+  rejected rather than reinterpreted as Eidos targets.
 - `SYNTH_SCENARIO=<substr>` -- restrict to scenarios whose slugified
   key contains this slugified substring. Both sides are slugified
   before comparison, so `"P2ID"`, `"p2id"`, `"P2ID note"`, and
   `"p2id-note"` all match `"consume single P2ID note"`.
+- `SYNTH_BENCH_AXES=<axes>` -- comma-separated subset of `exec`, `trace_prep`, `prove`, and
+  `verify`; `all` selects every axis.
+- `SYNTH_SAMPLE_SIZE=<n>`, `SYNTH_MEASUREMENT_TIME_SECS=<n>`, and
+  `SYNTH_WARM_UP_TIME_SECS=<n>` -- Criterion timing controls.
 - `SYNTH_MASM_WRITE=1` -- dump each emitted MASM program to
   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
   inspection.

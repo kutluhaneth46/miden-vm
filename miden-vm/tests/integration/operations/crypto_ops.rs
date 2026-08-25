@@ -2,11 +2,9 @@
 use miden_core::field::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
 #[cfg(feature = "arbitrary")]
-use miden_utils_testing::build_test;
-#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_bcompress, build_expected_hash, build_op_test,
+    Felt, build_expected_bcompress, build_expected_hash, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
 };
 
@@ -437,6 +435,31 @@ fn aead_stream_rejects_dst_range_overflow() {
             ..
         }
     ));
+}
+
+#[test]
+fn aead_stream_allows_ranges_ending_at_memory_limit() {
+    const LAST_SOURCE_ADDR: u64 = (u32::MAX as u64) + 1 - 8;
+    const LAST_DESTINATION_ADDR: u64 = (u32::MAX as u64) + 1 - 16;
+
+    for (src_addr, dst_addr) in [(LAST_SOURCE_ADDR, 0), (0, LAST_DESTINATION_ADDR)] {
+        let source = format!(
+            "
+            begin
+                push.1
+                push.{dst_addr}
+                push.{src_addr}
+                push.0
+                push.4.3.2.1
+
+                crypto_stream
+                dropw drop drop drop drop
+            end
+            "
+        );
+
+        build_test!(&source, &[]).check_constraints();
+    }
 }
 
 #[test]

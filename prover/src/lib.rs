@@ -34,6 +34,9 @@ static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCac
 
 mod prover;
 
+#[cfg(all(test, feature = "std"))]
+mod overflow_pointer_soundness_repro;
+
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{DeserializationError, MidenAir, PublicInputs, config};

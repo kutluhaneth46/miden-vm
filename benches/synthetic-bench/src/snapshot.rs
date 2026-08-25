@@ -19,6 +19,22 @@ const MIN_TRACE_LEN: u64 = 64;
 /// One BlakeG compression cycle occupies 32 rows.
 const BLAKEG_COMPRESSION_CYCLE_LEN: u64 = 32;
 
+/// One Poseidon2 permutation cycle occupies 16 rows.
+const POSEIDON2_CYCLE_LEN: u64 = 16;
+
+/// Explicit authentication scenarios retained in the upstream Poseidon2 producer artifact.
+///
+/// The Eidos benchmark does not execute these source rows. The list is kept here so fixture
+/// tooling and coverage tests cannot silently fall back to the old ambiguous P2ID scenario keys.
+pub const POSEIDON2_AUTH_SCENARIOS: &[&str] = &[
+    "consume single P2ID note with Falcon signing",
+    "consume single P2ID note with ECDSA signing",
+    "consume two P2ID notes with Falcon signing",
+    "consume two P2ID notes with ECDSA signing",
+    "create single P2ID note with Falcon signing",
+    "create single P2ID note with ECDSA signing",
+];
+
 /// A single scenario's trace snapshot, extracted from a producer JSON file.
 ///
 /// On disk, the chiplet breakdown is nested under `trace` as `chiplets_shape`
@@ -35,6 +51,31 @@ pub struct TraceSnapshot {
     pub trace: TraceTotals,
     /// Advisory per-chiplet breakdown used by the solver for shaping.
     pub shape: TraceBreakdown,
+}
+
+/// One entry from the preserved Poseidon2 producer artifact.
+///
+/// This type exists to validate source coverage only. It deliberately does not implement
+/// [`TraceSnapshot::shape`], so Poseidon2 rows cannot be fed to the Eidos solver accidentally.
+#[derive(Debug, Clone)]
+pub struct Poseidon2SourceSnapshot {
+    /// Poseidon2 AIR-side row totals from the producer.
+    pub trace: Poseidon2SourceTraceTotals,
+    /// Per-chiplet breakdown from the producer.
+    pub shape: TraceBreakdown,
+}
+
+/// AIR-side row totals in the preserved Poseidon2 producer schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Poseidon2SourceTraceTotals {
+    /// System + decoder + stack trace length.
+    pub core_rows: u64,
+    /// Total chiplets trace length.
+    pub chiplets_rows: u64,
+    /// Poseidon2 permutation AIR trace length.
+    pub poseidon2_permutation_rows: u64,
+    /// Range-checker trace length.
+    pub range_rows: u64,
 }
 
 /// Origin of a snapshot's trace-row counts.
@@ -87,10 +128,10 @@ pub struct TraceBreakdown {
     pub hasher_rows: u64,
     pub bitwise_rows: u64,
     pub memory_rows: u64,
-    /// Kernel ROM rows. Not drivable from plain MASM; folded into memory.
+    /// Kernel ROM rows. Not driven independently by the synthetic suite.
     #[serde(default)]
     pub kernel_rom_rows: u64,
-    /// ACE chiplet rows. Not drivable from plain MASM; folded into memory.
+    /// ACE chiplet rows. Not driven independently by the synthetic suite.
     #[serde(default)]
     pub ace_rows: u64,
 }
@@ -140,6 +181,23 @@ impl TraceTotals {
     }
 }
 
+impl Poseidon2SourceTraceTotals {
+    /// Padded bracket shared by the core and range traces in the Poseidon2 topology.
+    pub fn padded_core_side(&self) -> u64 {
+        self.core_rows.max(self.range_rows).next_power_of_two().max(MIN_TRACE_LEN)
+    }
+
+    /// Padded chiplets bracket in the Poseidon2 topology.
+    pub fn padded_chiplets(&self) -> u64 {
+        self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    }
+
+    /// Padded Poseidon2 permutation bracket.
+    pub fn padded_poseidon2_permutation(&self) -> u64 {
+        self.poseidon2_permutation_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    }
+}
+
 impl TraceBreakdown {
     /// Sum of all chiplet sub-traces plus the mandatory +1 padding row, matching
     /// `ChipletsLengths::trace_len` in the processor. Used as the loader's consistency check
@@ -153,13 +211,13 @@ impl TraceBreakdown {
             + 1
     }
 
-    /// Memory-row target the solver aims for: snapshot memory plus ACE and kernel_rom (both
-    /// unreachable from plain MASM) folded in.
+    /// Advisory memory-like rows: snapshot memory plus ACE and kernel ROM.
     pub fn memory_target(&self) -> u64 {
         self.memory_rows + self.kernel_rom_rows + self.ace_rows
     }
 
-    /// Rows folded into the memory target from unreachable chiplets.
+    /// Rows combined with memory in advisory reporting because this suite does not drive them
+    /// independently.
     pub fn substituted_rows(&self) -> u64 {
         self.kernel_rom_rows + self.ace_rows
     }
@@ -194,6 +252,11 @@ impl TraceSnapshot {
 
         let mut out = Vec::with_capacity(raw.len());
         for (key, entry) in raw {
+            if entry.trace.poseidon2_permutation_rows.is_some()
+                && entry.trace.blakeg_compression_rows.is_none()
+            {
+                return Err(SnapshotError::Poseidon2SourceNotExecutable { scenario: key });
+            }
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
@@ -236,6 +299,51 @@ impl TraceSnapshot {
     }
 }
 
+impl Poseidon2SourceSnapshot {
+    /// Load and validate the preserved Poseidon2 producer artifact.
+    ///
+    /// These rows are source evidence only; callers that need an executable Eidos target must use
+    /// [`TraceSnapshot::load_all`] on an Eidos snapshot instead.
+    pub fn load_all(path: impl AsRef<Path>) -> Result<Vec<(String, Self)>, SnapshotError> {
+        let path_str = path.as_ref().display().to_string();
+        let bytes = std::fs::read(path.as_ref())
+            .map_err(|source| SnapshotError::Io { path: path_str, source })?;
+        let raw: BTreeMap<String, RawPoseidon2SourceEntry> =
+            serde_json::from_slice(&bytes).map_err(SnapshotError::Parse)?;
+
+        let mut out = Vec::with_capacity(raw.len());
+        for (key, entry) in raw {
+            let trace = Poseidon2SourceTraceTotals {
+                core_rows: entry.trace.core_rows,
+                chiplets_rows: entry.trace.chiplets_rows,
+                poseidon2_permutation_rows: entry.trace.poseidon2_permutation_rows,
+                range_rows: entry.trace.range_rows,
+            };
+            if trace.poseidon2_permutation_rows == 0
+                || !trace.poseidon2_permutation_rows.is_multiple_of(POSEIDON2_CYCLE_LEN)
+            {
+                return Err(SnapshotError::InvalidPoseidon2Rows {
+                    scenario: key,
+                    rows: trace.poseidon2_permutation_rows,
+                    cycle_len: POSEIDON2_CYCLE_LEN,
+                });
+            }
+
+            let shape = entry.trace.chiplets_shape;
+            let expected = shape.chiplets_sum();
+            if trace.chiplets_rows != expected {
+                return Err(SnapshotError::InconsistentChipletsTotal {
+                    scenario: key,
+                    from_trace: trace.chiplets_rows,
+                    from_shape: expected,
+                });
+            }
+            out.push((key, Self { trace, shape }));
+        }
+        Ok(out)
+    }
+}
+
 /// Each scenario entry in a producer JSON. The producer also writes cycle counts at the top level
 /// (`prologue`, `epilogue`, ...), but the consumer ignores everything except provenance and
 /// `trace`.
@@ -252,8 +360,24 @@ struct RawTrace {
     chiplets_rows: u64,
     #[serde(default)]
     blakeg_compression_rows: Option<u64>,
+    #[serde(default)]
+    poseidon2_permutation_rows: Option<u64>,
     #[serde(alias = "range_rows")]
     byte_pair_lookup_rows: u64,
+    chiplets_shape: TraceBreakdown,
+}
+
+#[derive(Deserialize)]
+struct RawPoseidon2SourceEntry {
+    trace: RawPoseidon2SourceTrace,
+}
+
+#[derive(Deserialize)]
+struct RawPoseidon2SourceTrace {
+    core_rows: u64,
+    chiplets_rows: u64,
+    poseidon2_permutation_rows: u64,
+    range_rows: u64,
     chiplets_shape: TraceBreakdown,
 }
 
@@ -283,6 +407,18 @@ pub enum SnapshotError {
         rows: u64,
         cycle_len: u64,
     },
+    #[error(
+        "scenario {scenario:?} contains Poseidon2 source rows, not an executable Eidos snapshot"
+    )]
+    Poseidon2SourceNotExecutable { scenario: String },
+    #[error(
+        "snapshot inconsistency in scenario {scenario:?}: poseidon2_permutation_rows = {rows} is not a positive multiple of {cycle_len}"
+    )]
+    InvalidPoseidon2Rows {
+        scenario: String,
+        rows: u64,
+        cycle_len: u64,
+    },
 }
 
 #[cfg(test)]
@@ -299,6 +435,13 @@ mod tests {
         padded_and8: u64,
         padded_chiplets: u64,
         padded_blakeg: u64,
+    }
+
+    struct Poseidon2SourceExpectation {
+        scenario_key: &'static str,
+        padded_core_side: u64,
+        padded_chiplets: u64,
+        padded_poseidon2: u64,
     }
 
     const PROVISIONAL_SCENARIO_EXPECTATIONS: &[ProvisionalScenarioExpectation] = &[
@@ -352,6 +495,45 @@ mod tests {
         },
     ];
 
+    const POSEIDON2_SOURCE_EXPECTATIONS: &[Poseidon2SourceExpectation] = &[
+        Poseidon2SourceExpectation {
+            scenario_key: "consume single P2ID note with Falcon signing",
+            padded_core_side: 131_072,
+            padded_chiplets: 16_384,
+            padded_poseidon2: 65_536,
+        },
+        Poseidon2SourceExpectation {
+            scenario_key: "consume single P2ID note with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 8_192,
+            padded_poseidon2: 32_768,
+        },
+        Poseidon2SourceExpectation {
+            scenario_key: "consume two P2ID notes with Falcon signing",
+            padded_core_side: 131_072,
+            padded_chiplets: 16_384,
+            padded_poseidon2: 65_536,
+        },
+        Poseidon2SourceExpectation {
+            scenario_key: "consume two P2ID notes with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 8_192,
+            padded_poseidon2: 32_768,
+        },
+        Poseidon2SourceExpectation {
+            scenario_key: "create single P2ID note with Falcon signing",
+            padded_core_side: 131_072,
+            padded_chiplets: 16_384,
+            padded_poseidon2: 65_536,
+        },
+        Poseidon2SourceExpectation {
+            scenario_key: "create single P2ID note with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 8_192,
+            padded_poseidon2: 32_768,
+        },
+    ];
+
     fn expectation_for(
         producer_stem: &str,
         scenario_key: &str,
@@ -379,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_target_folds_ace_and_kernel_rom() {
+    fn advisory_memory_target_includes_ace_and_kernel_rom() {
         let (_, b) = sample_shape();
         assert_eq!(b.memory_target(), 400);
         assert_eq!(b.substituted_rows(), 100);
@@ -506,6 +688,48 @@ mod tests {
              unexpected (in snapshots/ but not in the table -- add an entry): {unexpected:?}\n  \
              missing    (in the table but not in any snapshots/*.json -- refresh the snapshot or remove the entry): {missing:?}",
         );
+    }
+
+    #[test]
+    fn poseidon2_source_snapshot_preserves_upstream_coverage() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let source_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots/poseidon2-source/bench-tx.json");
+        let scenarios = Poseidon2SourceSnapshot::load_all(&source_path)
+            .unwrap_or_else(|err| panic!("load {}: {err}", source_path.display()));
+        assert_eq!(scenarios.len(), 43, "the preserved upstream producer artifact drifted");
+
+        let by_key: BTreeMap<&str, &Poseidon2SourceSnapshot> =
+            scenarios.iter().map(|(key, snapshot)| (key.as_str(), snapshot)).collect();
+        let source_keys: BTreeSet<&str> = by_key.keys().copied().collect();
+        let selected_keys: BTreeSet<&str> = POSEIDON2_AUTH_SCENARIOS.iter().copied().collect();
+        let expected_keys: BTreeSet<&str> =
+            POSEIDON2_SOURCE_EXPECTATIONS.iter().map(|entry| entry.scenario_key).collect();
+        assert_eq!(selected_keys, expected_keys, "auth scenario selection drifted");
+        assert!(
+            selected_keys.is_subset(&source_keys),
+            "the preserved source is missing explicit Falcon/ECDSA fixture keys"
+        );
+        assert!(!source_keys.contains("consume single P2ID note"));
+        assert!(!source_keys.contains("consume two P2ID notes"));
+        assert!(!source_keys.contains("create single P2ID note"));
+
+        for expected in POSEIDON2_SOURCE_EXPECTATIONS {
+            let snapshot = by_key[expected.scenario_key];
+            assert_eq!(snapshot.trace.padded_core_side(), expected.padded_core_side);
+            assert_eq!(snapshot.trace.padded_chiplets(), expected.padded_chiplets);
+            assert_eq!(snapshot.trace.padded_poseidon2_permutation(), expected.padded_poseidon2);
+        }
+    }
+
+    #[test]
+    fn poseidon2_source_snapshot_is_not_executable_as_eidos() {
+        let source_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots/poseidon2-source/bench-tx.json");
+        let err = TraceSnapshot::load_all(&source_path)
+            .expect_err("Poseidon2 source rows must not be interpreted as Eidos targets");
+        assert!(matches!(err, SnapshotError::Poseidon2SourceNotExecutable { .. }));
     }
 
     #[test]

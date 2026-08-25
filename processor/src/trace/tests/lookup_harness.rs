@@ -21,7 +21,7 @@ use miden_air::{
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
-use miden_core::field::QuadFelt;
+use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
 use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, VmTrace};
@@ -51,6 +51,16 @@ impl InteractionLog {
     pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
             trace.main_trace().to_air_matrices();
+        Self::from_air_matrices(&core_matrix, &chip_matrix, &blakeg_matrix, &and8_matrix)
+    }
+
+    /// Drive the prover-path lookup emitters with caller-supplied per-AIR trace matrices.
+    pub(super) fn from_air_matrices(
+        core_matrix: &RowMajorMatrix<Felt>,
+        chip_matrix: &RowMajorMatrix<Felt>,
+        blakeg_matrix: &RowMajorMatrix<Felt>,
+        and8_matrix: &RowMajorMatrix<Felt>,
+    ) -> Self {
         // Core has no periodic columns.
         let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
         let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
@@ -66,24 +76,24 @@ impl InteractionLog {
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
         let core_fractions =
-            build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &challenges);
+            build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], &challenges);
         let chip_fractions = build_lookup_fractions(
             &MidenAir::CHIPLETS,
-            &chip_matrix,
+            chip_matrix,
             None,
             &chip_periodic,
             &challenges,
         );
         let blakeg_fractions = build_lookup_fractions(
             &MidenAir::BLAKEG_COMPRESSION,
-            &blakeg_matrix,
+            blakeg_matrix,
             None,
             &blakeg_periodic,
             &challenges,
         );
         let and8_fractions = build_lookup_fractions(
             &MidenAir::AND8_LOOKUP,
-            &and8_matrix,
+            and8_matrix,
             Some(&and8_preprocessed),
             &[],
             &challenges,
@@ -116,6 +126,19 @@ impl InteractionLog {
                 self.rows[row],
             );
         }
+    }
+
+    /// Return the net multiplicity emitted for `message` across the complete trace.
+    pub fn net_multiplicity<M>(&self, message: &M) -> Felt
+    where
+        M: LookupMessage<Felt, QuadFelt>,
+    {
+        let denominator = message.encode(&self.challenges);
+        self.rows
+            .iter()
+            .flatten()
+            .filter_map(|&(multiplicity, encoded)| (encoded == denominator).then_some(multiplicity))
+            .sum()
     }
 }
 

@@ -41,9 +41,25 @@ use super::message::LookupMessage;
 /// Field order mirrors the `(V, U)` tuple convention used throughout the
 /// adapter code: numerator first, denominator second.
 ///
-/// Single interactions use the degree of their standalone post-flag contribution. Batch, group,
-/// and column scopes use the degree of the total `(V, U)` pair they contribute to the enclosing
-/// scope.
+/// ## Semantics by call site
+///
+/// - **Single interactions** ([`LookupGroup::add`], `remove`, `insert`, `insert_encoded`, and the
+///   corresponding [`LookupBatch`] methods): `(v, u) = (deg(m) + deg(f), deg(D) + deg(f))`, where
+///   `m` is the signed multiplicity, `D` is the denominator, and `f` is the gate. For batch
+///   entries, `f` is the batch gate. These values describe the interaction itself; the batch fold
+///   later multiplies its numerator by the other entries' denominators.
+///
+/// - **Batch outer** ([`LookupGroup::batch`]): the post-flag contribution the *whole* batch makes
+///   to the enclosing group's `(V_g, U_g)` — `(deg(N) + deg(f), deg(D) + deg(f))` where `(N, D)` is
+///   the running pair the inner-loop body accumulates and `f` is the batch flag. The pre-flag `(N,
+///   D)` is mechanically derivable from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k`
+///   interactions of inner denominator degree `d_v` — so it is documented inline at each batch site
+///   rather than carried in the struct.
+///
+/// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
+///   [`LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
+///   column to the surrounding accumulator. Useful as a budget audit number when the author wants
+///   to assert what the scope as a whole contributes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Deg {
     pub v: usize,

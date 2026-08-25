@@ -39,14 +39,74 @@ without adding bridge rows or extending a VM trace.
 
 Range-check requests currently come from:
 
-- operand-stack `u32` operations, which range-check their 16-bit helper limbs;
-- the memory chiplet, which range-checks sorted-access deltas and address limbs; and
+- selected operand-stack [`u32` operations](./stack/u32_ops.md#range-checks), which request four
+  checks for decoder helper values; `U32DIV` requests two additional checks for its remainder
+  bound;
+- `MPVERIFY` and `MRUPDATE`, which request checks for the depth $d$ and
+  $2^{10}(d - 1)$, accepting exactly $1 \le d \le 64$;
+- each `MPVERIFY` or `MRUPDATE`, which requests checks for the four limbs
+  $y_0, y_1, y_2, y_3$ of its canonical-index helper and for $2y_3$;
+- the memory chiplet, which requests five checks for sorted-access deltas and address limbs on each
+  active row; and
 - the BlakeG compression AIR, which range-checks fused message/output limbs.
+
+On an `MPVERIFY` or `MRUPDATE` row, the six Core helpers are `[addr, b, y0, y1, y2, y3]`.
+`CoreAir` enforces booleanity of $b$ and
+
+$$
+n + b + 2y = Q - 1,
+$$
+
+where $n$ is the stack's node index, $Q$ is the base-field modulus, and
+$y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3$. The Merkle-init bus binds $b$ to the first
+direction bit derived by the hash controller. Range-checking the four limbs and $2y_3$ proves
+$y < 2^{63}$ and rules out a wrapped 64-bit path index. These requests are replayed through
+existing Core lookup columns: the low three limbs use the stack-overflow column, while the top-limb,
+doubled-top-limb, depth, and scaled-depth requests are split between the chiplet-request and
+block-stack/range/log-deferred columns. No hasher-controller capacity cells are used. See
+[Merkle range checks](./stack/crypto_ops.md#merkle-range-checks) for the exact packing.
 
 The trace builder collects these counts deterministically and writes them into the range
 multiplicity column of `And8LookupAir`. The relation uses its own bus identifier, so range-check
 messages cannot cancel byte-AND or BlakeG-rotation messages even though they share the same fixed
 rows.
+
+## Communication bus
+
+The domain-separated `RangeCheck`
+[communication bus](./lookups/index.md#communication-buses-in-miden-vm) encodes a value as
+$d_{\mathrm{range}}(x) = \operatorname{prefix}_{\mathrm{RangeCheck}} + \beta^0 x$. A request made
+under flag $f$ contributes
+
+$$
+-\frac{f}{d_{\mathrm{range}}(x)},
+$$
+
+while an And8 table row contributes
+
+$$
+\frac{m}{d_{\mathrm{range}}(v)}.
+$$
+
+These interactions do not use a dedicated $b_{\mathrm{range}}$ accumulator. They are packed with
+other lookup interactions in the Core and Chiplets AIRs. For AIR $i$, let $\sigma_i$ be the sum of
+all its lookup contributions and $n_i$ its trace length. The AIR commits the normalized sum
+
+$$
+\sigma'_i = \frac{\sigma_i}{n_i}.
+$$
+
+The verifier enforces the cross-AIR identity
+
+$$
+\sum_i n_i \sigma'_i + c_{\mathrm{boundary}} = 0,
+$$
+
+where $c_{\mathrm{boundary}}$ contains the explicit boundary messages required by other buses. The
+`RangeCheck` bus has no boundary messages, so its table responses must cancel its requests.
+Internally, the first lookup accumulator is anchored at zero and follows a normalized cyclic
+recurrence, including the last-to-first edge; there is no separate requirement that a terminal
+$b_{\mathrm{range}}$ value be zero.
 
 ## Cost and topology
 

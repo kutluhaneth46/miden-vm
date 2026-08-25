@@ -946,7 +946,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree5_op_flags,
         /// Operation Flag of MPVERIFY operation.
-        #[expect(dead_code)]
         mpverify => opcodes::MPVERIFY,
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
@@ -984,7 +983,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree4_op_flags,
         /// Operation Flag of MRUPDATE operation.
-        #[expect(dead_code)]
         mrupdate => opcodes::MRUPDATE,
         /// Operation Flag of CALL operation.
         call => opcodes::CALL,

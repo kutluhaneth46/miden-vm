@@ -310,6 +310,8 @@ manipulations.
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
 | `crypto_stream` | `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]` | `[K_CTR(4), counter+1, src_ptr+8, dst_ptr+16, remaining-1, ...]` | 1 | Derives a BlakeG-XOF block, XORs it bytewise with 8 plaintext field elements, and writes 16 u32 ciphertext limbs. Primitive used by `miden::core::crypto::aead_blakeg`. |
 
+`mtree_get`, `mtree_set`, and `mtree_verify` require `1 <= d <= 64`; other depths are rejected.
+
 ## Flow Control Operations
 
 High-level constructs for controlling the execution flow.

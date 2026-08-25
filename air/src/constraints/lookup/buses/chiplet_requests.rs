@@ -1,6 +1,9 @@
-//! Chiplet requests bus ([`BusId::Chiplets`]).
+//! Decoder-side chiplet and U32DIV range-check requests.
 //!
-//! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
+//! This column carries requests for the hasher, bitwise, memory, ACE init, and kernel ROM chiplets,
+//! plus `BusId::RangeCheck` requests for the final two U32DIV helper limbs.
+//! The U32DIV range-check batch shares this column because its opcode is disjoint from every
+//! chiplet-request branch and its degree fits the column bound.
 //!
 //! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
 //! The emitter uses ordinary lookup batches; cached encoding is unnecessary for this column today.
@@ -14,7 +17,7 @@ use crate::{
         main_air::{MainBusContext, MainLookupBuilder},
         messages::{
             AceInitMsg, AeadBlakeGInputMsg, AeadStreamRequestMsg, BitwiseMsg, HasherMsg,
-            KernelRomMsg, MemoryMsg,
+            KernelRomMsg, MemoryMsg, RangeMsg,
         },
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
@@ -30,10 +33,11 @@ use crate::{
 ///
 /// Every branch here is gated by one mutually exclusive decoder-opcode flag. The heaviest
 /// branch is MRUPDATE, whose batch emits 4 removes (merkle_old_init + return_hash +
-/// merkle_new_init + return_hash). No other single branch exceeds 4.
+/// merkle_new_init + return_hash). MPVERIFY emits its two hasher requests plus the direct range
+/// check of canonical-index witness limb y3. No branch exceeds 4.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the chiplet requests bus.
+/// Emit decoder-side chiplet and U32DIV range-check requests.
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -54,6 +58,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let h = dec.hasher_state;
     let group_count = dec.group_count;
     let helper0 = user_helpers[0];
+    let merkle_direction_bit = user_helpers[1];
+    let merkle_y3 = user_helpers[5];
     let clk = local.system.clk;
     let sys_ctx = local.system.ctx;
     let sys_ctx_next = next.system.ctx;
@@ -293,6 +299,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     HasherMsg::merkle_verify_init(
                                         helper0.clone(),
                                         mp_index,
+                                        merkle_direction_bit.into(),
                                         stk_word_0,
                                     ),
                                     Deg { v: 5, u: 6 },
@@ -303,8 +310,13 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     HasherMsg::return_hash(return_addr, old_root),
                                     Deg { v: 5, u: 6 },
                                 );
+                                b.remove(
+                                    "mpverify_merkle_y3",
+                                    RangeMsg { value: merkle_y3.into() },
+                                    Deg { v: 5, u: 6 },
+                                );
                             },
-                            Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
+                            Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
                         );
                     }
 
@@ -327,6 +339,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     HasherMsg::merkle_old_init(
                                         helper0.clone(),
                                         mr_index.clone(),
+                                        merkle_direction_bit.into(),
                                         stk_word_0,
                                     ),
                                     Deg { v: 4, u: 5 },
@@ -343,7 +356,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     helper0.clone() + mr_depth.clone() * cycle_len.clone();
                                 b.remove(
                                     "mrupdate_new_init",
-                                    HasherMsg::merkle_new_init(new_init_addr, mr_index, new_node),
+                                    HasherMsg::merkle_new_init(
+                                        new_init_addr,
+                                        mr_index,
+                                        merkle_direction_bit.into(),
+                                        new_node,
+                                    ),
                                     Deg { v: 4, u: 5 },
                                 );
                                 let new_return_addr = helper0
@@ -523,6 +541,30 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             MemoryMsg::read_word(sys_ctx.into(), alpha_ptr.into(), clk.into(), word)
                         },
                         Deg { v: 5, u: 6 },
+                    );
+
+                    // --- U32DIV remainder-bound range check ---
+                    // U32DIV uses h4/h5 for the low/high limbs of divisor - remainder - 1.
+                    // Together with the AIR binding, range-checking these limbs enforces
+                    // remainder < divisor.
+                    // Its opcode is disjoint from every chiplet-request branch in this column, so
+                    // these two removals do not increase the column's per-row interaction bound.
+                    g.batch(
+                        "u32div_remainder_diff_range",
+                        op_flags.u32div(),
+                        move |b| {
+                            b.remove(
+                                "u32div_remainder_diff_lo",
+                                RangeMsg { value: user_helpers[4].into() },
+                                Deg { v: 6, u: 7 },
+                            );
+                            b.remove(
+                                "u32div_remainder_diff_hi",
+                                RangeMsg { value: user_helpers[5].into() },
+                                Deg { v: 6, u: 7 },
+                            );
+                        },
+                        Deg { v: 7, u: 8 }, // (V, U) = (1 + 6, 2 + 6)
                     );
 
                     // --- U32AND / U32XOR ---

@@ -47,9 +47,12 @@ Miden VM uses multiple communication buses:
 - The chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, ACE, and Kernel ROM). It is implemented using multiset checks.
 - The hash/kernel bus [$b_{hash\_kernel}$](../chiplets/index.md#chiplets-bus), which combines several multiset-backed channels (hash sibling table, kernel ROM procedure table, ACE memory requests, and deferred-root updates).
 - The ACE wiring bus [$v_{wiring}$](../chiplets/ace.md#circuit-evaluation), which ties together ACE node wiring. It is implemented using LogUp.
-- The range-check relation, which connects requests from the [stack](../stack/u32_ops.md),
-  [memory](../chiplets/memory.md), and BlakeG AIR to the fixed 16-bit table embedded in
-  [`And8LookupAir`](../range.md). It is implemented using LogUp.
+- The domain-separated `RangeCheck` [bus](../range.md#communication-bus), which matches requests
+  from [u32 operations](../stack/u32_ops.md), Merkle depth and canonical-index checks from
+  [Merkle operations](../stack/crypto_ops.md#merkle-range-checks), the
+  [memory chiplet](../chiplets/memory.md), and the BlakeG AIR against the fixed 16-bit table in
+  [`And8LookupAir`](../range.md#fixed-byte-pair-table). It is implemented using LogUp and packed
+  into shared lookup columns rather than a dedicated $b_{range}$ column.
 
 
 ## Length of auxiliary columns for lookup arguments

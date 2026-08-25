@@ -61,6 +61,7 @@ use miden_precompiles::CurvePrecompile;
 use crate::{
     ec::{
         EcRequire,
+        msm::trace::{EcExprPtr, EcMsmRequires},
         trace::{EcGroupPtr, EcPointPtr},
     },
     logup::build_logup_aux_trace,
@@ -280,12 +281,12 @@ enum UintKey {
 /// `group_ptr` + coord hashes (the group rides the cap not the children, so
 /// identical coords on distinct groups stay distinct; ∞ uses the zero coord
 /// hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim by its
-/// `expr_ptr` (one node per expression; its hash chains the whole term run).
+/// `(expr_ptr, claim hash)` (one node per structural claim; its hash chains the whole term run).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EcKey {
     Create(u32, EidosDigest, EidosDigest),
     Op(EcOpId, EidosDigest, EidosDigest),
-    Msm(u32),
+    Msm(u32, EidosDigest),
 }
 
 /// `*Requires`-pattern accumulator for the eval chip, built from explicit
@@ -766,27 +767,46 @@ impl TranscriptEvalRequires {
     /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
-    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `expr`. Returns
-    /// the value's shared-use [`EcNode`].
+    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)` and bumps the MSM
+    /// resolve use count only for a new row. Returns the value's shared-use [`EcNode`].
     pub fn record_ec_msm(
         &mut self,
-        expr: u32,
-        group: u32,
-        val: EcPointPtr,
-        bound: u32,
+        expr: EcExprPtr,
         terms: &[(EcNode, UintNode)],
+        msm: &mut EcMsmRequires,
         eidos: &mut EidosRequires,
     ) -> EcNode {
-        if let Some(&node) = self.ec_dedup.get(&EcKey::Msm(expr)) {
-            return node;
-        }
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
+        let group = msm.group(expr);
+        let bound = msm.sbound(expr);
+        let val = msm.value(expr);
+        let chiplet = msm.terms(expr);
+
+        // Fully-merged claim: one pair per chiplet term, distinct bases, each
+        // pair a real term of `expr`. With distinct bases + matching count +
+        // each-pair-a-term, the pairs *are* the chiplet's term set — so the
+        // seam's set match is well-defined and the root tracks the term set,
+        // not an unmerged split.
+        assert_eq!(
+            terms.len(),
+            chiplet.len(),
+            "ec_msm needs exactly one (base, scalar) pair per claim term",
+        );
+        for i in 0..terms.len() {
+            for j in (i + 1)..terms.len() {
+                assert_ne!(terms[i].0.point, terms[j].0.point, "duplicate base in ec_msm claim");
+            }
+            assert!(
+                chiplet.iter().any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
+                "(base, scalar) pair is not a term of this MSM expression",
+            );
+        }
+
         let blocks: Vec<_> = terms
             .iter()
             .map(|(base, scalar)| {
                 assert_eq!(
-                    scalar.bound_ptr.addr(),
-                    bound,
+                    scalar.bound_ptr, bound,
                     "term scalar must be stored under the claim's scalar bound",
                 );
                 (base.hash.as_array(), scalar.hash.as_array())
@@ -794,9 +814,15 @@ impl TranscriptEvalRequires {
             .collect();
 
         let chain_context = EidosCap::ec_msm_iv();
+        let h_claim = EidosRequires::digest_of(chain_context, &blocks);
+        let key = EcKey::Msm(expr.addr(), h_claim);
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return node;
+        }
+
         let absorption = eidos.require_absorption(chain_context, blocks.iter().copied());
+        debug_assert_eq!(absorption.digest, h_claim);
         let _ = eidos.require_digest(absorption.digest);
-        let h_claim = absorption.digest;
 
         let mut absorbs = Vec::with_capacity(terms.len());
         let logical_len =
@@ -816,7 +842,6 @@ impl TranscriptEvalRequires {
                 cv = Eidos::compress_block(cv, final_block);
             }
             let digest = EidosDigest(cv.into_elements());
-
             absorbs.push(MsmAbsorb {
                 base_hash: base.hash,
                 scalar_hash: scalar.hash,
@@ -828,7 +853,7 @@ impl TranscriptEvalRequires {
             self.consume_ec(base);
             self.consume_uint(scalar);
         }
-        debug_assert_eq!(absorbs.last().expect("non-empty MSM").digest, h_claim);
+        debug_assert_eq!(EidosDigest(cv.into_elements()), h_claim);
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
@@ -836,15 +861,16 @@ impl TranscriptEvalRequires {
             absorbed: None, // per-row perms / digests live in `absorbs`
             kind: NodeKind::EcMsm {
                 absorbs,
-                expr,
-                group,
+                expr: expr.addr(),
+                group: group.addr(),
                 val: val.addr(),
-                bound,
+                bound: bound.addr(),
             },
         });
         self.node_consumers.insert(id, 0);
         let node = EcNode { id, hash: h_claim, point: val };
-        self.ec_dedup.insert(EcKey::Msm(expr), node);
+        self.ec_dedup.insert(key, node);
+        msm.consume_claim(expr, 1);
         node
     }
 

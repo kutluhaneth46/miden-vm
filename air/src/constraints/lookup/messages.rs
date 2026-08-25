@@ -206,6 +206,8 @@ pub enum HasherPayload<E> {
     Rate(Rate<E>),
     /// 4-element word/digest.
     Word(WordFields<E>),
+    /// Merkle direction bit followed by a 4-element leaf word.
+    MerkleWord { direction_bit: E, word: WordFields<E> },
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
@@ -310,36 +312,41 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Start Merkle path verification (with explicit node_index).
     ///
     /// Used by: MPVERIFY input.
-    pub fn merkle_verify_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_verify_init(
+        addr: E,
+        node_index: E,
+        direction_bit: E,
+        word: WordFields<E>,
+    ) -> Self {
         Self {
             kind: BusId::HasherMerkleVerifyInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 
     /// Start Merkle update, old path (with explicit node_index).
     ///
     /// Used by: MRUPDATE old input.
-    pub fn merkle_old_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_old_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleOldInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 
     /// Start Merkle update, new path (with explicit node_index).
     ///
     /// Used by: MRUPDATE new input.
-    pub fn merkle_new_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_new_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleNewInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 }
@@ -764,12 +771,21 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[self.kind as usize].clone();
         acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
-        let payload = match &self.payload {
-            HasherPayload::State(state) => state.as_slice(),
-            HasherPayload::Rate(rate) => rate.as_slice(),
-            HasherPayload::Word(word) => word.as_slice(),
-        };
-        acc += challenges.inner_product_at(2, payload);
+        match &self.payload {
+            HasherPayload::State(state) => {
+                acc += challenges.inner_product_at(2, state.as_slice());
+            },
+            HasherPayload::Rate(rate) => {
+                acc += challenges.inner_product_at(2, rate.as_slice());
+            },
+            HasherPayload::Word(word) => {
+                acc += challenges.inner_product_at(2, word.as_slice());
+            },
+            HasherPayload::MerkleWord { direction_bit, word } => {
+                acc += challenges.inner_product_at(2, core::slice::from_ref(direction_bit));
+                acc += challenges.inner_product_at(3, word.as_slice());
+            },
+        }
         acc
     }
 }
@@ -1139,10 +1155,9 @@ where
 // SIBLING MESSAGES
 // ================================================================================================
 //
-// [`SiblingMsg<E>`] carries the relevant hasher half alongside a [`SiblingBit`] tag and
-// encodes against sparse beta layouts (`[2, 7, 8, 9, 10]` and `[2, 3, 4, 5, 6]`) dictated by
-// the responder-side hasher chiplet algebra. The trait is permissive about which beta
-// positions an `encode` body touches; contiguity is a convention, not a requirement.
+// [`SiblingMsg<E>`] carries an already selected rate half and a [`SiblingBit`] tag. It uses the
+// sparse beta layout expected by the hasher chiplet. Lookup-message encoders may touch sparse beta
+// positions; contiguity is a convention, not a requirement.
 
 /// Sibling-table message for the Merkle sibling bus.
 ///
@@ -1189,8 +1204,8 @@ where
 mod tests {
     use miden_core::{Felt, field::QuadFelt};
 
-    use super::*;
-    use crate::lookup::LookupMessage;
+    use super::{And8Msg, BusId, MIDEN_MAX_MESSAGE_WIDTH};
+    use crate::lookup::{Challenges, message::LookupMessage};
 
     #[test]
     fn blakeg_rotation_positions_are_domain_separated() {
