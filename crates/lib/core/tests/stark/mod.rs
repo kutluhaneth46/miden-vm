@@ -5,7 +5,7 @@ use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
+    program::{ExecutionClaim, KERNEL_DOMAIN_TAG, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
 use miden_crypto::stark::{
@@ -211,7 +211,8 @@ fn stark_verifier_e2f4_rejects_wrong_order_tag() {
     // Mirror `verify_vm_proof`'s staging, but flip the derived order tag before dispatching the
     // constraint evaluation check. The registry then selects a different circuit commitment, so
     // circuit lookup/authentication cannot succeed.
-    let source = "
+    let source = format!(
+        "
         use miden::core::mem
         use miden::core::stark::constants
         use miden::core::stark::verifier
@@ -224,6 +225,8 @@ fn stark_verifier_e2f4_rejects_wrong_order_tag() {
         use miden::core::sys::vm::layout
         use miden::core::sys::vm::ood_frames
         use miden::core::sys::vm::public_inputs
+
+        const KERNEL_DOMAIN_TAG = {kernel_domain_tag}
 
         proc wrong_constraints_eval
             # Flip the derived tag, then dispatch to the wrong order-specific circuit.
@@ -244,12 +247,11 @@ fn stark_verifier_e2f4_rejects_wrong_order_tag() {
             dup u32mod.4 assertz
             div.4
             dup u32lte.255 assert
-            dup exec.layout::kernel_witness_ptr swap
-            exec.mem::pipe_words_to_memory
-            dropw dropw dropw drop
             dup exec.layout::num_kernel_procedures_ptr mem_store
-            exec.layout::kernel_witness_ptr
-            exec.claim::kernel_commitment
+            exec.layout::kernel_witness_ptr swap
+            push.KERNEL_DOMAIN_TAG
+            exec.mem::pipe_words_to_memory_in_domain
+            movup.4 drop
             assert_eqw
         end
 
@@ -275,10 +277,12 @@ fn stark_verifier_e2f4_rejects_wrong_order_tag() {
 
             exec.verifier::verify
         end
-        ";
+        ",
+        kernel_domain_tag = KERNEL_DOMAIN_TAG.as_canonical_u64(),
+    );
 
     let test = build_test!(
-        source,
+        source.as_str(),
         &data.initial_stack(),
         data.advice_stack(),
         data.store.clone(),
