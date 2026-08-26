@@ -279,10 +279,7 @@ fn absorb_rate_blocks(state: &mut Word, elements: &[Felt]) {
         elements.len().is_multiple_of(RATE),
         "sponge absorption requires whole rate blocks"
     );
-    for block in elements.chunks_exact(RATE) {
-        *state = Eidos::compress_block(
-            *state,
-            block.try_into().expect("a full Eidos block has RATE elements"),
-        );
+    for &block in elements.as_chunks::<RATE>().0 {
+        *state = Eidos::compress_block(*state, block);
     }
 }
