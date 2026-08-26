@@ -1,7 +1,10 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air::trace::{MIN_TRACE_LEN, blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN};
+use miden_air::{
+    MIDEN_AIR_COUNT, PcsParams, memory,
+    trace::{MIN_TRACE_LEN, blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN},
+};
 
 use super::chiplets::Chiplets;
 use crate::{Felt, ONE};
@@ -177,6 +180,9 @@ pub struct TraceLenSummary {
     chiplets: ChipletsLengths,
     blakeg_compression_rows: usize,
     byte_pair_lookup_rows: usize,
+    /// Set by the trace builder when known, in [`miden_air::AIRS`] order. `None` falls back to
+    /// deriving the four padded heights from the unpadded component row counts.
+    padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
 }
 
 impl TraceLenSummary {
@@ -191,6 +197,25 @@ impl TraceLenSummary {
             chiplets,
             blakeg_compression_rows,
             byte_pair_lookup_rows,
+            padded_heights: None,
+        }
+    }
+
+    /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
+    /// [`miden_air::AIRS`] order: Core, Chiplets, BlakeG compression, then And8 lookup.
+    pub fn new_with_padded(
+        core_rows: usize,
+        chiplets: ChipletsLengths,
+        blakeg_compression_rows: usize,
+        byte_pair_lookup_rows: usize,
+        padded_heights: [usize; MIDEN_AIR_COUNT],
+    ) -> Self {
+        TraceLenSummary {
+            core_rows,
+            chiplets,
+            blakeg_compression_rows,
+            byte_pair_lookup_rows,
+            padded_heights: Some(padded_heights),
         }
     }
 
@@ -227,6 +252,14 @@ impl TraceLenSummary {
         self.byte_pair_lookup_rows
     }
 
+    /// Returns the maximum unpadded row count among the four AIRs.
+    pub fn trace_len(&self) -> usize {
+        self.core_rows
+            .max(self.chiplets_rows())
+            .max(self.blakeg_compression_rows)
+            .max(self.byte_pair_lookup_rows)
+    }
+
     /// Returns the padded height of the core AIR.
     pub fn core_height(&self) -> usize {
         padded_height(self.core_rows)
@@ -240,6 +273,34 @@ impl TraceLenSummary {
     /// Returns the padded height of the BlakeG-compression AIR.
     pub fn blakeg_compression_height(&self) -> usize {
         padded_height(self.blakeg_compression_rows)
+    }
+
+    /// Returns the greatest padded height among the four AIRs.
+    pub fn padded_trace_len(&self) -> usize {
+        self.padded_heights
+            .map(|heights| heights.into_iter().max().expect("heights is non-empty"))
+            .unwrap_or_else(|| {
+                self.core_height()
+                    .max(self.chiplets_height())
+                    .max(self.blakeg_compression_height())
+                    .max(self.byte_pair_lookup_rows)
+            })
+    }
+
+    /// Returns the padded per-AIR heights, in [`miden_air::AIRS`] order, if known.
+    pub fn padded_heights(&self) -> Option<&[usize; MIDEN_AIR_COUNT]> {
+        self.padded_heights.as_ref()
+    }
+
+    /// Returns the modelled peak prover memory, in bytes, for the padded per-AIR heights, if
+    /// known. See [`miden_air::memory::prover_peak_bytes`] for what this does and does not cover.
+    pub fn prover_memory_bytes(&self, params: &PcsParams) -> Option<u64> {
+        memory::prover_peak_bytes(self.padded_heights()?, params)
+    }
+
+    /// Returns the percent (0 - 100) of rows added by padding.
+    pub fn padding_percentage(&self) -> usize {
+        (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
     }
 }
 
@@ -258,6 +319,32 @@ mod tests {
 
         assert_eq!(summary.blakeg_compression_rows(), 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.blakeg_compression_count(), 3);
+    }
+
+    #[test]
+    fn trace_len_summary_records_four_air_heights_in_instance_order() {
+        let heights = [MIN_TRACE_LEN, 2 * MIN_TRACE_LEN, 4 * MIN_TRACE_LEN, 1 << 16];
+        let summary = TraceLenSummary::new_with_padded(
+            17,
+            ChipletsLengths::from_parts(19, 0, 0, 0, 0),
+            3 * BLAKEG_COMPRESSION_CYCLE_LEN,
+            1 << 16,
+            heights,
+        );
+
+        assert_eq!(summary.core_rows(), 17);
+        // ChipletsLengths adds the mandatory connector-padding row.
+        assert_eq!(summary.chiplets_rows(), 20);
+        assert_eq!(summary.blakeg_compression_rows(), 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
+        assert_eq!(summary.padded_heights(), Some(&heights));
+        assert_eq!(summary.padded_trace_len(), 1 << 16);
+
+        let params = miden_air::config::pcs_params();
+        assert_eq!(
+            summary.prover_memory_bytes(&params),
+            memory::prover_peak_bytes(&heights, &params)
+        );
     }
 }
 

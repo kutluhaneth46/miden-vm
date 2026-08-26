@@ -3,7 +3,7 @@ use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::{
-    CoreCols, Felt, StackCols, SystemCols,
+    AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols, config, memory,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
         SYS_TRACE_WIDTH,
@@ -50,11 +50,22 @@ pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STAC
 /// Physical row width of the core buffer: the per-AIR Core matrix consumed directly by proving.
 pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH;
 
-/// `build_trace()` uses this as a hard cap on trace rows.
+/// `build_trace()` uses this as a hard cap on trace rows, independent of the memory budget.
 ///
 /// The code checks `core_trace_contexts.len() * fragment_size` before allocation. It checks the
-/// same cap again while replaying chiplet activity. This keeps memory use bounded.
+/// same cap again while replaying chiplet activity, and once more against each padded per-AIR
+/// height once they're known (see [`validate_heights_within_max_trace_len`]). Row indices are
+/// `u32`-backed, so this bound must hold regardless of budget; the actual memory bound is the
+/// tiered check in `build_trace_inner` (see [`memory::max_any_height_for_budget`] and
+/// [`memory::prover_peak_bytes`]).
 pub(crate) const MAX_TRACE_LEN: usize = 1 << 29;
+
+/// Default maximum modelled peak memory, in bytes, [`build_trace`] assumes when no budget is given
+/// explicitly.
+/// Set to 64 GiB, comfortably above every workload in-repo and far below what the previous
+/// row-count cap admitted; callers that own actual proving policy (e.g. `miden-prover`'s
+/// `Prover`) are expected to set their own via [`build_trace_with_budget`].
+pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
 pub(crate) mod core_trace_fragment;
 
@@ -90,35 +101,34 @@ mod tests;
 /// ```
 #[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
-    build_trace_with_max_len(witness, MAX_TRACE_LEN)
+    build_trace_inner(witness, None, DEFAULT_MAX_PROVER_MEMORY_BYTES)
 }
 
-/// Same as [`build_trace`], but with a custom hard cap.
-///
-/// When the trace would go over `max_trace_len`, this returns
-/// [`ExecutionError::TraceLenExceeded`].
-pub fn build_trace_with_max_len(
+/// Same as [`build_trace`], but with an explicit modelled peak-memory budget instead of the
+/// default. See [`miden_air::memory`] for the model's scope and exclusions.
+pub fn build_trace_with_budget(
     witness: VmWitness,
-    max_trace_len: usize,
+    max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, max_trace_len)
+    build_trace_inner(witness, None, max_prover_memory_bytes)
 }
 
-/// Same as [`build_trace`], but with a hasher chiplet that was already built — used by the
-/// streaming path, where the hasher builder runs concurrently with program execution
+/// Same as [`build_trace_with_budget`], but with a hasher chiplet that was already built — used
+/// by the streaming path, where the hasher builder runs concurrently with program execution
 /// (`FastProcessor::execute_and_build_trace_sync`, std-only).
 #[cfg(feature = "std")]
 pub(crate) fn build_trace_with_prebuilt_hasher(
     witness: VmWitness,
     prebuilt_hasher: Hasher,
+    max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, Some(prebuilt_hasher), MAX_TRACE_LEN)
+    build_trace_inner(witness, Some(prebuilt_hasher), max_prover_memory_bytes)
 }
 
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
-    max_trace_len: usize,
+    max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
     let VmWitness {
         program_info,
@@ -141,19 +151,32 @@ fn build_trace_inner(
         max_stack_depth,
     } = trace;
 
-    // Before any trace generation, check that the number of core trace rows doesn't exceed the
-    // maximum trace length. This is a necessary check to avoid OOM panics during trace generation,
-    // which can occur if the execution produces an extremely large number of steps.
+    let pcs_params = config::pcs_params();
+
+    // Tier 1: a permissive per-AIR row cap derived from the cheapest AIR's marginal cost, so it
+    // never rejects a shape that the exact budget check below would accept. `MAX_TRACE_LEN` is a
+    // hard ceiling independent of the budget (row indices are `u32`-backed).
+    let max_trace_len =
+        MAX_TRACE_LEN.min(memory::max_any_height_for_budget(max_prover_memory_bytes, &pcs_params));
+
+    // Before any trace generation, check that the core trace buffer `generate_core_trace_row_major`
+    // is about to allocate (`core_trace_contexts.len() * fragment_size` rows, before any padding or
+    // proving-time blowup) doesn't itself exceed the byte budget. This is deliberately a separate,
+    // more permissive cap than `max_trace_len`: that one prices in the full proving pipeline
+    // (blowup, quotient, Merkle trees) that this raw buffer hasn't incurred yet, so reusing it here
+    // would reject buffer allocations the exact budget check below would happily accept once the
+    // real (usually much smaller) padded core height is known.
     //
     // Note that we add 1 to the total core trace rows to account for the additional HALT opcode row
     // that is pushed at the end of the last fragment.
+    let max_core_alloc_len = MAX_TRACE_LEN.min(max_core_alloc_rows(max_prover_memory_bytes));
     let total_core_trace_rows = core_trace_contexts
         .len()
         .checked_mul(fragment_size)
         .and_then(|n| n.checked_add(1))
-        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
-    if total_core_trace_rows > max_trace_len {
-        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+        .ok_or(ExecutionError::TraceLenExceeded(max_core_alloc_len))?;
+    if total_core_trace_rows > max_core_alloc_len {
+        return Err(ExecutionError::TraceLenExceeded(max_core_alloc_len));
     }
 
     if core_trace_contexts.is_empty() {
@@ -191,22 +214,41 @@ fn build_trace_inner(
     let core_height = pad_to_trace_length(core_trace_len);
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
     let byte_pair_lookup_rows = AND8_LOOKUP_TRACE_HEIGHT;
-    let max_trace_height = core_height
-        .max(chiplets_height)
-        .max(blakeg_compression_height)
-        .max(byte_pair_lookup_rows);
 
-    // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
-    // when the unpadded check above passed.
-    if max_trace_height > max_trace_len {
-        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    // Exact check against modelled peak prover memory: pad-up can push usage over budget even
+    // when the permissive tier-1 row cap above passed.
+    debug_assert_eq!(
+        AIRS,
+        [
+            MidenAir::Core,
+            MidenAir::Chiplets,
+            MidenAir::BlakeGCompression,
+            MidenAir::And8Lookup,
+        ],
+        "heights below must be listed in AIRS order",
+    );
+    let heights: [usize; MIDEN_AIR_COUNT] =
+        [core_height, chiplets_height, blakeg_compression_height, byte_pair_lookup_rows];
+    validate_heights_within_max_trace_len(&heights)?;
+    let estimated_bytes = memory::prover_peak_bytes(&heights, &pcs_params).ok_or(
+        ExecutionError::ProverMemoryExceeded {
+            estimated_bytes: u64::MAX,
+            budget_bytes: max_prover_memory_bytes,
+        },
+    )?;
+    if estimated_bytes > max_prover_memory_bytes {
+        return Err(ExecutionError::ProverMemoryExceeded {
+            estimated_bytes,
+            budget_bytes: max_prover_memory_bytes,
+        });
     }
 
-    let trace_len_summary = TraceLenSummary::new(
+    let trace_len_summary = TraceLenSummary::new_with_padded(
         core_trace_len,
         ChipletsLengths::new(&chiplets),
         blakeg_compression_trace_len,
         byte_pair_lookup_rows,
+        heights,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
@@ -247,6 +289,29 @@ fn build_trace_inner(
 /// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
 fn pad_to_trace_length(logical_len: usize) -> usize {
     logical_len.next_power_of_two().max(MIN_TRACE_LEN)
+}
+
+/// The largest number of core-trace rows that may be allocated for
+/// `generate_core_trace_row_major`'s raw buffer while staying within `max_prover_memory_bytes`.
+///
+/// The buffer is `rows * CORE_STORAGE_WIDTH` [`Felt`]s at its 1x size, with no blowup, quotient, or
+/// Merkle-tree overhead yet, so this is priced directly off the buffer's own byte size rather than
+/// through [`memory::max_any_height_for_budget`]'s full-pipeline model.
+fn max_core_alloc_rows(max_prover_memory_bytes: u64) -> usize {
+    let bytes_per_row = (CORE_STORAGE_WIDTH * size_of::<Felt>()) as u64;
+    usize::try_from(max_prover_memory_bytes / bytes_per_row).unwrap_or(usize::MAX)
+}
+
+/// Rejects any padded per-AIR height above the hard [`MAX_TRACE_LEN`] row cap, independent of the
+/// memory budget: row indices are `u32`-backed, so a height must stay well under `2^32` regardless
+/// of how permissive the budget is.
+fn validate_heights_within_max_trace_len(
+    heights: &[usize; MIDEN_AIR_COUNT],
+) -> Result<(), ExecutionError> {
+    if heights.iter().any(|&height| height > MAX_TRACE_LEN) {
+        return Err(ExecutionError::TraceLenExceeded(MAX_TRACE_LEN));
+    }
+    Ok(())
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
