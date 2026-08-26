@@ -8,16 +8,20 @@ use miden::core::crypto::hashes::eidos
 
 begin
     # Reads 100 words from the advice provider, stores them in memory, and computes their hash.
+    # Bind the full 400-Felt message length into the initial Eidos chaining value.
+    push.400 exec.eidos::init_chaining_word movdnw.2
+    # => [BLOCK_LO=ZERO_WORD, BLOCK_HI=ZERO_WORD, CV, addr=0]
+
     repeat.50
         adv_pipe bcompress
     end
-    # => [X, HASH, X, addr]
+    # => [BLOCK_LO, BLOCK_HI, DIGEST, addr]
 
-    # Drop the junk words (denoted by `X` above).
+    # Drop the two preserved block words.
     exec.eidos::digest
-    # => [HASH, addr]
+    # => [DIGEST, addr]
 
     # Drop the memory address.
     movup.4 drop
-    # => [HASH]
+    # => [DIGEST]
 end

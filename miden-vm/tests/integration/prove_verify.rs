@@ -110,6 +110,8 @@ fn test_all_hash_functions_prove_verify() {
         end
     ";
 
+    // The direct verifier accepts every supported proof hasher. The recursive MASM verifier is
+    // Eidos-only and is exercised separately below.
     for (hash_fn, hash_name) in [
         (HashFunction::Blake3_256, "Blake3_256"),
         (HashFunction::Keccak, "Keccak"),
@@ -132,7 +134,7 @@ fn test_u32div_prove_verify() {
             push.196612 push.3 u32divmod drop drop
         end
     ";
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, true);
 }
 
 #[test]

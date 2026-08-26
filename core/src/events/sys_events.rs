@@ -274,8 +274,8 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: [A, B, C, D]} (16 elements)
     ///
     /// Where:
-    /// - KEY is computed as hash_elements([A, B, C, D]) using the sponge construction (sequential
-    ///   absorption; two rounds for four words).
+    /// - KEY is computed as the canonical Eidos hash of `[A, B, C, D]`, using two 8-Felt
+    ///   compression blocks with the full 16-Felt length bound into the initial chaining value.
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map

@@ -133,13 +133,13 @@ end
 
 #! Copies an even number of words from the advice stack to memory, updating the Eidos state.
 #!
-#! Inputs:  [R0, R1, C, write_ptr, end_ptr]
-#! Outputs: [R0', R1', C', write_ptr]
+#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr]
+#! Outputs: [BLOCK_LO', BLOCK_HI', CV', write_ptr]
 #!
 #! Where:
-#! - R0 is the first rate word / digest (positions 0-3, on top of stack).
-#! - R1 is the second rate word (positions 4-7).
-#! - C is the capacity word (positions 8-11).
+#! - BLOCK_LO is the first preserved block word (positions 0-3, on top of stack).
+#! - BLOCK_HI is the second preserved block word (positions 4-7).
+#! - CV is the chaining word / digest (positions 8-11).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - end_ptr is the memory pointer where the copying should end.
 #!
@@ -149,59 +149,59 @@ pub proc pipe_double_words_to_memory
   dup.13 dup.13 neq
 
   # loop until write_ptr reaches end_ptr
-  # LOOP: [b, R0, R1, C, write_ptr, end_ptr, ...]
+  # LOOP: [b, BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr, ...]
   while.true
     adv_pipe exec.eidos::compress
-    # => [R0', R1', C', write_ptr', end_ptr, ...]
+    # => [BLOCK_LO', BLOCK_HI', CV', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq
-    # LOOP: [b, R0', R1', C', write_ptr', end_ptr, ...]
+    # LOOP: [b, BLOCK_LO', BLOCK_HI', CV', write_ptr', end_ptr, ...]
   end
 
   movup.13 drop
-  # [R0', R1', C', write_ptr', ...]
+  # [BLOCK_LO', BLOCK_HI', CV', write_ptr', ...]
 end
 
 # Absorbs the even-word prefix and, when present, one final padded word into Eidos.
 #
 # Inputs:  [CV, write_ptr, end_ptr, needs_padding]
-# Outputs: [R0, R1, C', write_ptr']
+# Outputs: [BLOCK_LO, BLOCK_HI, CV', write_ptr']
 proc pipe_words_to_memory_with_capacity
-  # Set the initial rate to zero and absorb all complete rate blocks.
+  # Set the two block words to zero and compress all complete blocks.
   padw padw
   exec.pipe_double_words_to_memory
-  # => [R0, R1, C', write_ptr, needs_padding, ...]
+  # => [BLOCK_LO, BLOCK_HI, CV', write_ptr, needs_padding, ...]
 
   movup.13
-  # => [needs_padding, R0, R1, C', write_ptr, ...]
+  # => [needs_padding, BLOCK_LO, BLOCK_HI, CV', write_ptr, ...]
 
   if.true
-    # Eidos uses overwrite mode. Replace the rate with the final word and zero padding.
+    # Replace the block with the final word and zero padding.
     swapw dropw
     adv_loadw
-    # => [R0', C', write_ptr, ...]
+    # => [BLOCK_LO', CV', write_ptr, ...]
 
     # Store the final word and advance write_ptr.
     movup.8 dup add.4 movdn.5
     mem_storew_le
     movup.4 movdn.8
-    # => [R0', C', write_ptr+4, ...]
+    # => [BLOCK_LO', CV', write_ptr+4, ...]
 
     padw swapw exec.eidos::compress
-    # => [R0'', R1', C'', write_ptr+4, ...]
+    # => [BLOCK_LO'', BLOCK_HI', CV'', write_ptr+4, ...]
   end
 end
 
 #! Copies an arbitrary number of words from the advice stack to memory, updating the Eidos state.
 #!
 #! Inputs:  [num_words, write_ptr]
-#! Outputs: [R0, R1, C, write_ptr']
+#! Outputs: [BLOCK_LO, BLOCK_HI, CV, write_ptr']
 #!
 #! Where:
 #! - num_words is the number of words which will be copied to the memory.
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
-#! - R0, R1, C are the final VM hasher state (R0 on top).
+#! - BLOCK_LO and BLOCK_HI are the final preserved block words; CV is the final digest.
 #!
 pub proc pipe_words_to_memory
   # check if there is an odd number of words
@@ -216,7 +216,7 @@ pub proc pipe_words_to_memory
   dup.1 mul.4 movdn.2
   sub mul.4 dup.2 add movup.2
   movup.2 exec.eidos::init_chaining_word
-  # => [C, write_ptr, end_ptr, needs_padding, ...]
+  # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
   exec.pipe_words_to_memory_with_capacity
 end
@@ -283,7 +283,7 @@ end
 pub proc pipe_preimage_to_memory
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
-  # => [R0, R1, C, write_ptr', COMMITMENT, ...]
+  # => [BLOCK_LO, BLOCK_HI, CV, write_ptr', COMMITMENT, ...]
 
   # Leave only the digest on the stack
   exec.eidos::digest
@@ -298,8 +298,8 @@ pub proc pipe_preimage_to_memory
   # => [write_ptr', ...]
 end
 
-#! Moves an even number of words from the advice stack to memory and asserts that their sequential
-#! hash matches a given commitment.
+#! Moves an even number of words from the advice stack to memory and asserts that their Eidos
+#! compression-chain hash matches a given commitment.
 #!
 #! Inputs:  [num_words, write_ptr, COMMITMENT]
 #! Outputs: [write_ptr']
@@ -321,13 +321,13 @@ pub proc pipe_double_words_preimage_to_memory
   # => [write_ptr, end_ptr, num_elements, COMMITMENT, ...]
 
   movup.2 exec.eidos::init_chaining_word
-  # => [C, write_ptr, end_ptr, COMMITMENT, ...]
+  # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
 
   padw padw
-  # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
+  # => [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr, COMMITMENT, ...]
 
   exec.pipe_double_words_to_memory
-  # => [R0, R1, C, write_ptr', COMMITMENT, ...]
+  # => [BLOCK_LO, BLOCK_HI, CV, write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack.
   exec.eidos::digest
@@ -341,7 +341,7 @@ pub proc pipe_double_words_preimage_to_memory
 end
 
 #! Moves an even number of words from the advice stack to memory and asserts that their
-#! domain-tagged sequential hash matches a given commitment.
+#! domain-tagged Eidos compression-chain hash matches a given commitment.
 #!
 #! Like `pipe_double_words_preimage_to_memory`, but binds a domain identifier into the Eidos CV.
 #!
@@ -378,13 +378,13 @@ pub proc pipe_double_words_preimage_to_memory_with_domain
     # => [write_ptr, end_ptr, num_elements, domain, COMMITMENT, ...]
 
     movup.3 movup.3 exec.eidos::init_chaining_word_in_domain
-    # => [C, write_ptr, end_ptr, COMMITMENT, ...]
+    # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
 
     padw padw
-    # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr, COMMITMENT, ...]
 
     exec.pipe_double_words_to_memory
-    # => [R0', R1', C', write_ptr', COMMITMENT, ...]
+    # => [BLOCK_LO', BLOCK_HI', CV', write_ptr', COMMITMENT, ...]
 
     # Leave just the digest on the stack.
     exec.eidos::digest

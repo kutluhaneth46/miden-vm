@@ -179,7 +179,7 @@ fn insert_hdword_into_adv_map(
 /// ```
 ///
 /// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
-/// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
+/// KEY is computed as the canonical Eidos hash of `[A, B, C, D]` (two compression blocks).
 fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
     let a = processor.stack_get_word(1);
@@ -201,23 +201,23 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     Ok(())
 }
 
-/// Reads three words from the operand stack and inserts the rate portion into the advice map
+/// Reads three words from the operand stack and inserts the two block words into the advice map
 /// under the key defined by applying `bcompress` to all three words.
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, RATE1, RATE2, CAP, ...]
+///   Operand stack: [event_id, BLOCK_LO, BLOCK_HI, CV, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [RATE1, RATE2]} (8 elements from rate portion)
+///   Advice map: {KEY: [BLOCK_LO, BLOCK_HI]} (8 block elements)
 /// ```
 ///
-/// Where `KEY` is computed by applying `bcompress` to the 12-element state and extracting the
-/// digest. The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
+/// Where `KEY` is the updated chaining value produced by applying `bcompress` to
+/// `[BLOCK_LO, BLOCK_HI, CV]`.
 fn insert_bcompress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
-    // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
+    // State layout: [BLOCK_LO, BLOCK_HI, CV] where BLOCK_LO is at positions 1-4.
     let mut state = [
         processor.stack_get(1),
         processor.stack_get(2),
@@ -233,7 +233,7 @@ fn insert_bcompress_into_adv_map(processor: &mut FastProcessor) -> Result<(), Sy
         processor.stack_get(12),
     ];
 
-    // Extract the rate portion (first 8 elements) as values to store.
+    // Preserve the two input block words (the first 8 elements) as the mapped values.
     let values = state[..VmHasher::RATE_LEN].to_vec();
 
     // Apply the VM hasher and extract the digest as the key.
@@ -553,7 +553,7 @@ mod tests {
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
 
     /// Tests that `insert_bcompress_into_adv_map` produces the same key as compressing the same
-    /// state directly, and stores the rate portion (first 8 elements) as the values.
+    /// state directly, and stores the two block words (first 8 elements) as the values.
     #[test]
     fn insert_bcompress_into_adv_map_consistent_with_compression() {
         // Build a 12-element state with distinct values.
@@ -579,7 +579,7 @@ mod tests {
                 .unwrap(),
         );
 
-        // The expected values are the rate portion (first 8 elements) of the *input* state.
+        // The expected values are the two block words (first 8 elements) of the input state.
         let expected_values = state_felts[..hasher::Hasher::RATE_LEN].to_vec();
 
         // Verify the advice map contains the correct entry.

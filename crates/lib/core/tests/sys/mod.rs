@@ -194,6 +194,32 @@ fn element_hash_procedures_reject_non_u32_length() {
     }
 }
 
+#[test]
+fn domain_hash_procedures_reject_non_31_bit_domain() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    const INVALID_DOMAIN: u64 = 1 << 31;
+    const PTR: u64 = 1000;
+    const ERROR_MSG: &str = "domain must fit in 31 bits";
+    let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
+    let source = format!(
+        "use miden::core::crypto::hashes::eidos \
+         begin push.{INVALID_DOMAIN} push.0 push.{PTR} \
+         exec.eidos::hash_elements_in_domain end"
+    );
+
+    let err = build_test!(source.as_str(), &[])
+        .execute()
+        .expect_err("a domain with bit 31 set must be rejected");
+    match err {
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, .. },
+            ..
+        } => assert_eq!(err_code, expected_error_code),
+        err => panic!("expected a failed domain assertion, got {err:?}"),
+    }
+}
+
 /// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
 /// same `(verifier_root, claim_commitment)` pair.
 #[test]

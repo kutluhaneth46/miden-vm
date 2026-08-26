@@ -65,7 +65,7 @@ content yields an identical digest, so equal subterms are shared automatically (
   restricted right-spined chain.
 - A **payload** is the node's body, in one of four shapes:
   - the framework `TRUE` sentinel, carrying no data; it is the only zero-payload node;
-  - a data payload: one or more 8-felt rate-sized chunks, linearly hashed under the tag. An empty
+  - a data payload: one or more 8-felt compression blocks, linearly hashed under the tag. An empty
     data payload is forbidden; precompiles decide whether a data payload represents a scalar,
     digest, message, hash preimage, coordinate, or some other local value;
   - a join payload: two child digests (`lhs`, `rhs`) for anything referential, such as a binary
@@ -79,7 +79,7 @@ content yields an identical digest, so equal subterms are shared automatically (
 
 The digest commits to both the node identity and body. Framework AND and CHUNKS nodes use their
 registered Eidos domains. A precompile-owned node absorbs every 8-felt payload chunk under the
-deferred-node domain, then compresses a final `tag || 0w` block so the complete tag is bound without
+deferred-node domain, then compresses a final `tag || ZERO_WORD` block so the complete tag is bound without
 restricting it to a small domain selector.
 
 ## Precompiles
@@ -198,9 +198,9 @@ predicate node — the framework registers an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
 The append path first evaluates the statement under the installed registry and rejects missing or
 non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
-implicit root and evaluates that root directly. The digest is structural: even `AND(TRUE, TRUE)` hashes
-under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
-semantically to `TRUE`.
+implicit root and evaluates that root directly. The digest is structural: even `AND(TRUE, TRUE)` is
+hashed with the distinct `DEFERRED_AND_DOMAIN` Eidos framing and is not equal to `TRUE_DIGEST`,
+though it evaluates semantically to `TRUE`.
 
 Hydration checks one fixed point: reconstruct the wire's implicit root and evaluate it to `TRUE`
 under the bundled precompiles. This prepares prover input; it is separate from execution-proof

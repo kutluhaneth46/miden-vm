@@ -1,6 +1,7 @@
 use miden_core::{Felt, advice::AdviceStack, chiplets::hasher::compress_state, utils::ToElements};
+use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionError, advice::AdviceError};
-use miden_utils_testing::expect_exec_error_matches;
+use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
@@ -145,4 +146,21 @@ fn adv_pipe_with_bcompress() {
 
     let test = build_test!(source, &[], &advice_stack);
     test.expect_stack(&final_stack);
+}
+
+#[test]
+fn unhashing_example_matches_canonical_eidos_hash() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/masm-examples/hashing/unhashing/unhashing.masm"
+    ));
+    let advice_stack: Vec<u64> = (0..400).collect();
+    let expected: Vec<u64> = build_expected_hash(&advice_stack)
+        .into_iter()
+        .map(|felt| felt.as_canonical_u64())
+        .collect();
+
+    build_test!(source, &[], &advice_stack)
+        .with_library(CoreLibrary::default().package())
+        .expect_stack(&expected);
 }

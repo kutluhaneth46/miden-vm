@@ -22,7 +22,7 @@ fn deferred_chunks_digest_matches_host() {
         begin
             {stores}
             push.{IN_PTR}
-            exec.::miden::precompiles::register_chunks_mem_1
+            exec.::miden::core::precompiles::register_chunks_mem_1
             swapw dropw
         end
         "#,
@@ -58,12 +58,12 @@ fn deferred_expression_digest_matches_host() {
         begin
             {stores}
             push.{IN_PTR}
-            exec.::miden::precompiles::register_chunks_mem_1
+            exec.::miden::core::precompiles::register_chunks_mem_1
             push.{OUT_PTR}
-            exec.::miden::precompiles::register_chunks_mem_1
+            exec.::miden::core::precompiles::register_chunks_mem_1
             swapw
             push.{tag}
-            exec.::miden::precompiles::register_expr
+            exec.::miden::core::precompiles::register_expr
             swapw dropw
         end
         "#,
@@ -95,7 +95,7 @@ fn deferred_memory_value_digest_matches_host() {
         begin
             {stores}
             push.1 push.{IN_PTR} push.{tag}
-            exec.::miden::precompiles::register_mem
+            exec.::miden::core::precompiles::register_mem
             swapw dropw
         end
         "#,

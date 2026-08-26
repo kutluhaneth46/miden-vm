@@ -2,8 +2,8 @@
 
 #! Eidos hash helpers built on the VM-native BlakeG compression operation.
 #!
-#! Procedures which operate on a three-word state use the layout `[R0, R1, C]`.
-#! After `bcompress`, `C` contains the new digest.
+#! Procedures which operate on a three-word state use the layout `[BLOCK_LO, BLOCK_HI, CV]`.
+#! After `bcompress`, `CV` contains the new digest.
 
 const EIDOS_INIT_CV_0 = 4280581858871862887
 const EIDOS_INIT_CV_1 = 2688637133034287986
@@ -23,7 +23,10 @@ end
 #!
 #! Input:  [n, domain, ...]
 #! Output: [CV, ...]
+#! Fails if `domain` does not fit in 31 bits.
 pub proc init_chaining_word_in_domain
+    dup.1 push.2147483648 u32lt assert.err="domain must fit in 31 bits"
+
     push.EIDOS_INIT_CV_3_BASE add
     # => [cv3, domain, ...]
 
@@ -51,16 +54,15 @@ pub proc digest
     dropw
 end
 
-#! Prepares the top of the stack with the hasher initial state.
+#! Prepares a raw all-zero three-word compression state.
 #!
-#! This procedure does not handle padding, so the caller must
-#! consume an amount of data which is a multiple of the rate (2 words).
+#! This is not a canonical Eidos hash initializer: it does not bind a message length or domain.
+#! It is only suitable for protocols which define and manage their own raw compression state.
 #!
 #! Input: []
-#! Output: [R0, R1, C, ...]
+#! Output: [BLOCK_LO, BLOCK_HI, CV, ...]
 #!
-#! Where R0, R1, C are three zero words representing the initial VM hasher state
-#! (R0 on top of stack).
+#! Where BLOCK_LO, BLOCK_HI, and CV are three zero words (BLOCK_LO on top of stack).
 #!
 pub proc init_no_padding
     padw padw padw
@@ -71,13 +73,13 @@ end
 #! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
 #! execution.
 #!
-#! Input: [R0, R1, C, ...]
-#! Output: [DIGEST, R0, R1, C, ...]
+#! Input: [BLOCK_LO, BLOCK_HI, CV, ...]
+#! Output: [DIGEST, BLOCK_LO, BLOCK_HI, CV, ...]
 #!
 #! Where:
-#! - `R0` is the first rate word (positions 0-3, on top of stack).
-#! - `R1` is the second rate word (positions 4-7).
-#! - `C` is the capacity word / digest (positions 8-11).
+#! - `BLOCK_LO` is the first preserved block word (positions 0-3, on top of stack).
+#! - `BLOCK_HI` is the second preserved block word (positions 4-7).
+#! - `CV` is the chaining word / digest (positions 8-11).
 pub proc copy_digest
     dupw.2
 end
@@ -87,14 +89,14 @@ end
 #! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
 #! will enter an infinite loop.
 #!
-#! Input: [R0, R1, C, start_addr, end_addr, ...]
-#! Output: [R0', R1', C', start_addr', end_addr, ...]
+#! Input: [BLOCK_LO, BLOCK_HI, CV, start_addr, end_addr, ...]
+#! Output: [BLOCK_LO', BLOCK_HI', CV', start_addr', end_addr, ...]
 #! where `start_addr' = end_addr`.
 #!
 #! Where:
-#! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
-#! - `R1` is the second rate word (positions 4-7).
-#! - `C` is the capacity word (positions 8-11).
+#! - `BLOCK_LO` is the first preserved block word (positions 0-3, on top of stack).
+#! - `BLOCK_HI` is the second preserved block word (positions 4-7).
+#! - `CV` is the chaining word / digest (positions 8-11).
 #!
 pub proc absorb_double_words_from_memory
     dup.13 dup.13 neq
@@ -165,14 +167,14 @@ end
 #! Initializes the hasher state required for the `hash_elements_with_state` procedure.
 #!
 #! Inputs:  [ptr, num_elements, domain]
-#! Outputs: [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+#! Outputs: [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 #!
 #! Where:
 #! - ptr is the memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
 #! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - domain is the domain identifier mixed into the initial chaining word.
-#! - R0, R1, C are three words representing the hasher state (R0 on top).
+#! - BLOCK_LO and BLOCK_HI are block words, and CV is the length/domain-bound chaining word.
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements that did not fit into word pairs and should be
 #!   hashed separately.
@@ -197,11 +199,11 @@ pub proc prepare_hasher_state
     # => [ptr, end_pairs_addr, num_elements%8, num_elements, domain]
 
     movup.4 movup.4 exec.init_chaining_word_in_domain
-    # => [C, ptr, end_pairs_addr, num_elements%8]
+    # => [CV, ptr, end_pairs_addr, num_elements%8]
 
     # prepare the three-word VM hasher state
     padw padw
-    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 end
 
 proc prepare_padded_hasher_state
@@ -223,10 +225,10 @@ proc prepare_padded_hasher_state
     # => [padded_len, ptr, end_pairs_addr, num_elements%8]
 
     exec.init_chaining_word
-    # => [C, ptr, end_pairs_addr, num_elements%8]
+    # => [CV, ptr, end_pairs_addr, num_elements%8]
 
     padw padw
-    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 end
 
 #! Computes hash of Felt values starting at the specified memory address using the provided hasher
@@ -236,13 +238,13 @@ end
 #! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
 #! procedure.
 #!
-#! Inputs:  [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 #! Outputs: [HASH]
 #!
 #! Where:
 #! - ptr is the memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - R0, R1, C are three words representing the hasher state (R0 on top).
+#! - BLOCK_LO and BLOCK_HI are block words, and CV is the current chaining word.
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements that did not fit into word pairs and should be
 #!   hashed separately.
@@ -250,7 +252,8 @@ end
 pub proc hash_elements_with_state
     # hash every pair of words
     exec.absorb_double_words_from_memory
-    # => [A, B, C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
+    # => [BLOCK_LO, BLOCK_HI, CV', ptr', end_pairs_addr, num_elements%8]
+    # where ptr' = end_pairs_addr
 
     # hash remaining input values if there are any left
     # if num_elements%8 is ZERO and there are no elements to hash
@@ -263,16 +266,16 @@ pub proc hash_elements_with_state
     else
         # load the remaining double word
         mem_stream
-        # => [A, B, C', ptr'+2, end_pairs_addr, num_elements%8]
+        # => [BLOCK_LO, BLOCK_HI, CV', ptr'+2, end_pairs_addr, num_elements%8]
 
         # clean the stack
         movup.12 drop movup.12 drop
-        # => [A, B, C', num_elements%8]
+        # => [BLOCK_LO, BLOCK_HI, CV', num_elements%8]
 
         # get the number of elements we need to drop
         # notice that drop_counter could be any number from 1 to 7
         push.8 movup.13 sub movdn.12
-        # => [A, B, C', drop_counter]
+        # => [BLOCK_LO, BLOCK_HI, CV', drop_counter]
         # => [a0, a1, a2, a3, b0, b1, b2, b3, C', drop_counter]
 
         ### 0th value ########################################################
@@ -368,14 +371,14 @@ pub proc hash_elements_with_state
         # we have number of elements not divisible by 8, so we will have at least one
         # element to hash here (which is a0).
 
-        # Reorder to get [A, B, C'] format for compression.
+        # Reorder to get [BLOCK_LO, BLOCK_HI, CV'] format for compression.
         # Current: [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
         # Need:    [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
         movup.7
         # => [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
 
         exec.compress
-        # => [A', B', C']
+        # => [BLOCK_LO', BLOCK_HI', CV']
 
         exec.digest
         # => [HASH]
@@ -405,14 +408,14 @@ pub proc hash_elements_with_domain
         # => [domain, ...]
 
         push.0 exec.init_chaining_word_in_domain
-        # => [C, ...]
+        # => [CV, ...]
 
         padw padw
         bcompress
         exec.digest
     else
         exec.prepare_hasher_state
-        # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+        # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 
         exec.hash_elements_with_state
         # => [HASH]
@@ -439,7 +442,8 @@ end
 #! This is not a hasher-internal padding rule. It changes the committed stream from
 #! `elements[..num_elements]` to `elements[..padded_len]`, where
 #! `padded_len = ceil(num_elements / 8) * 8`. The padding zeros are synthesized by this helper;
-#! callers do not need to store them in memory.
+#! callers do not need to store them in memory. An empty sequence uses the canonical Eidos
+#! empty-message path, including its required zero-block compression.
 #!
 #! Inputs:  [ptr, num_elements]
 #! Outputs: [HASH]
@@ -461,7 +465,7 @@ pub proc pad_and_hash_elements
         # => [ptr, num_elements, padded_len]
 
         exec.prepare_padded_hasher_state
-        # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+        # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 
         exec.hash_elements_with_state
     end
@@ -499,7 +503,7 @@ end
 #! Outputs: [C, ...]
 #!
 #! Where:
-#! - A and B are the words to be merged (A corresponds to the first rate word).
+#! - A and B are the words to be merged (A is the first block word).
 #! - C is `hash_elements_with_domain(A || B, domain)`.
 #!
 pub proc merge_in_domain

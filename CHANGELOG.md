@@ -24,10 +24,7 @@
 
 #### Changes
 
-- [BREAKING] Replaced the VM-native Poseidon2 permutation with Eidos, using one 32-row BlakeG
-  compression cycle per native hash-controller row. Native program, MAST, Merkle, advice-map,
-  Falcon, AEAD, deferred, and recursive-verifier digests are not compatible with earlier releases.
-  The optional Poseidon2 STARK proof-hash configuration remains supported.
+- [BREAKING] Replaced the VM-native Poseidon2 permutation with Eidos, using one 32-row BlakeG compression cycle per native hash-controller row. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and recursive-verifier commitments and digests are not compatible with earlier releases. The optional Poseidon2 STARK proof-hash configuration remains supported.
 - [BREAKING] Replaced `HPERM` with `BCOMPRESS`, re-specified `CRYPTOSTREAM` and `LOG_DEFERRED`
   for the Eidos-native protocol, renamed `adv.insert_hperm` to `adv.insert_bcompress`, renamed
   Falcon-Poseidon2 APIs to Falcon-Eidos, and replaced the legacy AEAD library with
@@ -40,8 +37,10 @@
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::eidos::hash_elements_in_domain` directly.
-- [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact, and full package commitments. Dependency records now use the full package commitment ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
-- [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact, dependency, and full package commitments. Dependency commitments exclude optional debug data and opaque custom sections ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
+- [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact,
+  dependency, and full package commitments. Dependency records use full package commitments;
+  dependency commitments exclude optional debug data and opaque custom sections
+  ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
   slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
 - [BREAKING] Added structural and hash-consistency validation to serde deserialization for `MerkleTree`, `Mmr`, `MmrPeaks`, `MmrPath`, `PartialMerkleTree`, and `SimpleSmt`. `Mmr` binary deserialization now applies the same validation, and `PartialMerkleTree::with_leaves` rejects depth-zero leaves ([#3645](https://github.com/0xMiden/miden-vm/pull/3645)).
@@ -57,7 +56,6 @@
 - [BREAKING] `Instruction::EmitImm` now pretty-prints as the equivalent `push.<value> emit drop` sequence instead of `emit.<felt>`, since `emit.<felt>` is invalid MASM which cannot be parsed ([#3567](https://github.com/0xMiden/miden-vm/pull/3567)).
 - Moved operation integration tests out of the obsolete `decorators` module ([#3449](https://github.com/0xMiden/miden-vm/issues/3449)).
 - [BREAKING] Added `miden::core::sys::pvm::verify_proof`, a MASM recursive verifier for the precompile VM, and generalized the shared MASM STARK verifier ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
-- [BREAKING] `DeferredProof::Stark` now carries a `DeferredClaim` in place of the raw deferred root (`{ proof, claim }`); the wire encoding is unchanged, and `miden_precompiles_prover::verify_deferred` returns the claim ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
 - Added `DeferredClaim`, a typed deferred-root claim whose commitment is the root itself; the PVM MASM adapter uses it for proof-request addressing and verifies its root as the STARK public input. `PrecompileProof` remains `{ proof, roots }` ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
 - [BREAKING] Factored recursive ACE circuits into per-order and shared sections, generalized the registry infrastructure to arbitrary AIR sets, and added the ten-AIR precompile VM registry. This changes the Miden VM and precompile VM ACE roots, relation digests, circuit shapes, and recursive-proof transcripts ([#3465](https://github.com/0xMiden/miden-vm/pull/3465)).
 - [BREAKING] Parsed assembly modules now keep constant expressions and inline event names until linking. This preserves source syntax and allows nested expressions to use imported constants ([#3612](https://github.com/0xMiden/miden-vm/pull/3612)).
