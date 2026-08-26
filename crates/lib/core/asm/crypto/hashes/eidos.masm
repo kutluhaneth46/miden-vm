@@ -451,13 +451,20 @@ end
 #! - HASH is the resulting hash of the provided memory values.
 pub proc pad_and_hash_elements
     dup.1 u32assert.err="num_elements must fit in a u32" drop
-    dup.1 add.7 u32divmod.8 drop mul.8 movdn.2
-    # => [ptr, num_elements, padded_len]
+    dup.1 eq.0
+    if.true
+        # The padded stream is empty. Use the canonical empty-message path, which performs one
+        # zero-block compression under the length-zero chaining value.
+        exec.hash_elements
+    else
+        dup.1 add.7 u32divmod.8 drop mul.8 movdn.2
+        # => [ptr, num_elements, padded_len]
 
-    exec.prepare_padded_hasher_state
-    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+        exec.prepare_padded_hasher_state
+        # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 
-    exec.hash_elements_with_state
+        exec.hash_elements_with_state
+    end
 end
 
 #! Computes the VM-native hash of a single word (256-bit input).

@@ -494,6 +494,26 @@ fn test_pad_and_hash_elements_synthesizes_zero_tail() {
 }
 
 #[test]
+fn test_pad_and_hash_elements_empty_matches_canonical_empty_hash() {
+    let source = "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        push.0.1000
+        exec.eidos::pad_and_hash_elements
+
+        # truncate stack
+        swapw dropw
+    end
+    ";
+
+    let expected: Vec<u64> =
+        build_expected_hash(&[]).into_iter().map(|e| e.as_canonical_u64()).collect();
+
+    build_test!(source, &[]).expect_stack(&expected);
+}
+
+#[test]
 fn test_hash_elements() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
