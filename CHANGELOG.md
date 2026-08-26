@@ -20,6 +20,7 @@
 - `midenc_hir_type` now supports self-recursive and mutually recursive struct and enum types, e.g. `struct Node { next: *Node }`. Recursion must cross a pointer, list, or function, so that every layout stays finite; more precisely, every cycle in the type reference graph must cross one of those. A recursive `Type` carries its whole definition group by `Arc`, so it remains self-contained: no interning table, definition registry, or context object is needed to interpret one, and descending through a backedge yields a type equal to the definition it points at.
 - Miden Assembly signatures can now declare a variadic type parameter with `...`, in either argument or result position, e.g. `pub proc log(prefix: felt, ...)` or `pub proc f() -> (count: u32, ...)`. It must come last in its list and may appear at most once, matching the rules documented on `midenc_hir_type::Type::Variadic`, and it is only accepted in a signature, not as an ordinary type.
 - Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type.
+- Added property and fuzz coverage for `ExecutionWitness` serialization, plus round-trip tests for external-library programs and wire-backed deferred proofs ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
 
 #### Changes
 
@@ -111,6 +112,12 @@
 - Fixed `miden-vm prove` so unsupported program extensions are rejected before inferred input files are loaded ([#3587](https://github.com/0xMiden/miden-vm/issues/3587)).
 - Rejected MAST basic block payloads whose batch metadata does not cover every serialized operation, instead of silently dropping the trailing operations during deserialization ([#3594](https://github.com/0xMiden/miden-vm/issues/3594)).
 - Hashed the local registry `index.toml` with ASCII trim on load, matching the write-path staleness check, so a leading NBSP or vertical tab no longer makes every write fail with `WriteToStaleIndex` ([#3651](https://github.com/0xMiden/miden-vm/issues/3651)).
+## v0.29.3 (2026-08-25)
+
+#### Fixes
+
+- Fixed `miden-vm bundle --release` to remove package debug information from library and kernel artifacts while preserving their MAST digests ([#3719](https://github.com/0xMiden/miden-vm/issues/3719)).
+- Fixed `miden-vm bundle --version` to store the requested version in library and kernel packages and reject invalid semantic versions ([#3659](https://github.com/0xMiden/miden-vm/issues/3659)).
 
 ## v0.29.2 (2026-08-20)
 
