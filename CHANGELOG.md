@@ -30,6 +30,7 @@
   Falcon-Poseidon2 APIs to Falcon-Eidos, and replaced the legacy AEAD library with
   `aead_eidos`. MAST serialization is now version 5 so forests containing the former opcode
   encoding are rejected instead of being reinterpreted.
+- [BREAKING] Aligned `aead_ref` with `CRYPTOSTREAM`'s eight-Felt XOF blocks; `aead_eidos::decrypt_empty_ad` now emits `miden::core::crypto::aead_eidos::decrypt_empty_ad`, whose plaintext-witness handler is included in `CoreLibrary::handlers()`; public Eidos AEAD procedures now reject invalid or overlapping memory ranges and counter overflow.
 - [BREAKING] Changed the Miden proof statement from three AIRs to four: Core, Chiplets, the
   standalone Eidos compression AIR, and the fixed And8 lookup AIR. The former range-checker AIR
   was removed; 16-bit range checks now use the fixed byte-pair table in the And8 AIR. The

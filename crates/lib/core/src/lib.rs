@@ -20,6 +20,7 @@ use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
+    aead_eidos::{AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, handle_aead_eidos_decrypt_empty_ad},
     debug::default_debug_handlers,
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
@@ -165,6 +166,10 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
+            (
+                AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
+                Arc::new(handle_aead_eidos_decrypt_empty_ad),
+            ),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),

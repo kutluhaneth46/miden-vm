@@ -18,9 +18,9 @@ mod framing;
 mod lmcs;
 mod primitive;
 
-/// Reference helpers for the Eidos-based AEAD construction.
+/// Host-side reference helpers for the Eidos-based AEAD construction.
 ///
-/// These functions support protocol-vector generation and cross-language conformance tests. They
+/// These functions implement the same stream and authentication contract as the VM helpers. They
 /// do not manage nonces; callers are responsible for enforcing nonce uniqueness.
 pub mod aead_ref;
 

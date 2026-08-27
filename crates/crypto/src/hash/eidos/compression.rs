@@ -25,11 +25,6 @@ pub(super) fn compress_cv_packed(
 }
 
 #[inline]
-pub(super) fn compress_raw_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-    CompressionCore::compress_raw(cv, block)
-}
-
-#[inline]
 pub(super) fn compress_xof_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     CompressionCore::compress_raw_xof(cv, block)
 }

@@ -160,10 +160,11 @@ fn precompile_semantic_api_is_available_from_precompiles_crate() {
 }
 
 #[test]
-fn core_library_load_registers_precompile_handlers() {
+fn core_library_load_registers_required_handlers() {
     use miden_core_lib::{
         CoreLibrary,
         handlers::{
+            aead_eidos::AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
             ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
             precompiles::{
                 keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
@@ -177,6 +178,7 @@ fn core_library_load_registers_precompile_handlers() {
     host.load_library(&core_lib).expect("failed to load core library");
 
     for event in [
+        AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
         KECCAK256_DIGEST_EVENT_NAME,
         UINT_FIELD_INV_EVENT_NAME,
         ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,

@@ -34,6 +34,8 @@ const AEAD_MAC_INIT_CV_1 = 2688637133034287986
 const AEAD_MAC_INIT_CV_2 = 1947077364413033169
 const AEAD_MAC_INIT_CV_3 = 6620516959492505600
 
+const AEAD_DECRYPT_EMPTY_AD_EVENT = event("miden::core::crypto::aead_eidos::decrypt_empty_ad")
+
 # Procedures
 # ================================================================================================
 
@@ -201,6 +203,37 @@ proc zero_felts
     drop
 end
 
+# Validates a memory pointer without consuming it.
+#
+# Input:  [ptr, ...]
+# Output: [ptr, ...]
+proc assert_aead_pointer
+    u32assert.err="AEAD pointer must fit in a u32"
+    dup u32mod.4 assertz.err="AEAD pointer must be word-aligned"
+end
+
+# Computes the last address of a non-empty memory range and rejects address overflow.
+#
+# Input:  [length, start, ...]
+# Output: [last, ...]
+proc checked_aead_range_last
+    u32assert2.err="AEAD range values must fit in a u32"
+    sub.1
+    u32overflowing_add
+    assertz.err="AEAD memory range exceeds the u32 address space"
+end
+
+# Validates the last counter used by a non-empty counter span.
+#
+# Input:  [count, counter, ...]
+# Output: [last_counter, ...]
+proc checked_aead_counter_last
+    u32assert2.err="AEAD counter values must fit in a u32"
+    sub.1
+    u32overflowing_add
+    assertz.err="AEAD counter range exceeds u32"
+end
+
 #! Loads `count` Felts from advice into memory.
 #!
 #! Input:  [dst_ptr, count, ...]
@@ -337,9 +370,11 @@ end
 #! Input:  [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, scratch_ptr, ...]
 #! Output: [tag0, tag1, ...]
 #!
-#! Preconditions: `scratch_ptr` points to at least 16 writable Felts and does
-#! not overlap `ct_ptr..ct_ptr + ciphertext_len`.
-@locals(20)
+#! `ct_ptr` and `scratch_ptr` must be word-aligned. The procedure rejects address overflow and
+#! overlap between `[ct_ptr, ct_ptr + ciphertext_len)` and `[scratch_ptr, scratch_ptr + 16)`.
+#! Both ranges must stay below the procedure's local frame. `scratch_ptr` must provide at least 16
+#! writable Felts.
+@locals(24)
 pub proc auth_empty_ad_expanded_with_scratch
     loc_storew_le.0
     dropw
@@ -359,6 +394,29 @@ pub proc auth_empty_ad_expanded_with_scratch
 
     drop drop drop
     # => [...]
+
+    loc_load.8 exec.assert_aead_pointer drop
+    loc_load.10 exec.assert_aead_pointer drop
+    loc_load.9 u32assert.err="AEAD ciphertext length must fit in a u32" drop
+
+    loc_load.10 push.16 exec.checked_aead_range_last
+    loc_store.21
+    locaddr.0 loc_load.21 u32gt
+    assert.err="AEAD memory ranges must stay below the local frame"
+
+    # An empty ciphertext range is disjoint from every workspace range.
+    loc_load.9 neq.0
+    if.true
+        loc_load.8 loc_load.9 exec.checked_aead_range_last
+        loc_store.20
+        locaddr.0 loc_load.20 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+
+        # scratch_ptr > ct_last OR ct_ptr > scratch_last
+        loc_load.10 loc_load.20 u32gt
+        loc_load.8 loc_load.21 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+    end
 
     push.0.0
     locaddr.16
@@ -507,15 +565,30 @@ end
 #! Input:  [K_MAC(4), nonce(4), ct_ptr, num_blocks, ...]
 #! Output: [tag0, tag1, ...]
 #!
-#! Preconditions: `ct_ptr` is word-aligned and points to `num_blocks * 8`
-#! expanded ciphertext-limb Felts.
-@locals(16)
+#! `ct_ptr` must be word-aligned. The procedure rejects address overflow and ciphertext ranges
+#! that reach its local frame before reading `num_blocks * 8` expanded ciphertext-limb Felts.
+@locals(20)
 pub proc auth_empty_ad_expanded
     loc_storew_le.0
     dropw
     loc_storew_le.4
     dropw
     # => [ct_ptr, num_blocks, ...]
+
+    dup exec.assert_aead_pointer loc_store.16
+    dup.1 u32assert.err="AEAD block count must fit in a u32" loc_store.17
+
+    loc_load.17 u32widening_mul.8
+    swap assertz.err="AEAD ciphertext length exceeds u32"
+    loc_store.18
+
+    loc_load.17 neq.0
+    if.true
+        loc_load.16 loc_load.18 exec.checked_aead_range_last
+        loc_store.19
+        locaddr.0 loc_load.19 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+    end
 
     # Keep the MAC mask in locals 2..4, but give Horner its canonical
     # `[r0, r1, 0, 0]` evaluation-point word.
@@ -527,7 +600,7 @@ pub proc auth_empty_ad_expanded
     push.0.0.0.0
     loc_storew_le.8
     dropw
-    dup.1 mul.8 loc_store.9
+    loc_load.18 loc_store.9
     # => [ct_ptr, num_blocks, ...]
 
     dup.1 neq.0
@@ -605,11 +678,49 @@ end
 #! Output: [K_CTR(4), src_ptr + 8*num_blocks, dst_ptr + 16*num_blocks,
 #!          counter + num_blocks, ...]
 #!
-#! Preconditions: `src_ptr` and `dst_ptr` are word-aligned and non-overlapping
-#! for every encrypted block. Plaintext length must be an exact multiple of 8 felts.
-#! `num_blocks = 0` is a valid no-op. Counter blocks under the same `K_CTR` must
-#! not repeat.
+#! `src_ptr` and `dst_ptr` must be word-aligned. The procedure rejects address overflow and any
+#! overlap between the complete plaintext and expanded-ciphertext ranges before writing output.
+#! Both ranges must stay below the procedure's local frame.
+#! Plaintext length must be an exact multiple of 8 Felts. `num_blocks = 0` is a valid no-op.
+#! `counter` and every counter used by the call must fit in a u32. Counter blocks under the same
+#! `K_CTR` must not repeat.
+@locals(8)
 pub proc encrypt_blocks_stream
+    # Validate the complete input and output ranges before the first write. Per-block checks alone
+    # do not prevent an early expanded-ciphertext block from overwriting a later plaintext block.
+    dup.4 exec.assert_aead_pointer loc_store.0
+    dup.5 exec.assert_aead_pointer loc_store.1
+    dup.6 u32assert.err="AEAD counter must fit in a u32" loc_store.7
+    dup.7 u32assert.err="AEAD block count must fit in a u32" loc_store.2
+
+    loc_load.2 u32widening_mul.8
+    swap assertz.err="AEAD plaintext length exceeds u32"
+    loc_store.3
+    loc_load.3 dup u32overflowing_add
+    assertz.err="AEAD ciphertext length exceeds u32"
+    loc_store.4
+
+    loc_load.2 neq.0
+    if.true
+        loc_load.7 loc_load.2 exec.checked_aead_counter_last
+        drop
+
+        loc_load.0 loc_load.3 exec.checked_aead_range_last
+        loc_store.5
+        loc_load.1 loc_load.4 exec.checked_aead_range_last
+        loc_store.6
+
+        locaddr.0 loc_load.5 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+        locaddr.0 loc_load.6 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+
+        # dst_ptr > src_last OR src_ptr > dst_last
+        loc_load.1 loc_load.5 u32gt
+        loc_load.0 loc_load.6 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+    end
+
     # Put loop state in the order expected below the Eidos counter block.
     movup.6
     movdn.4
@@ -661,11 +772,51 @@ end
 #! Output: [K_CTR(4), src_ptr + num_felts, dst_ptr + 2*num_felts,
 #!          counter + ceil(num_felts / 8), ...]
 #!
-#! Preconditions: `src_ptr` and `dst_ptr` are non-overlapping. The aligned
-#! prefix pointers must be word-aligned; the tail may have any length in 0..7.
-#! Counter blocks under the same `K_CTR` must not repeat.
-@locals(28)
+#! `src_ptr` and `dst_ptr` must be word-aligned. The procedure rejects address overflow and any
+#! overlap between the complete plaintext and expanded-ciphertext ranges before writing output.
+#! Both ranges must stay below the procedure's local frame. The tail may have any length in 0..7.
+#! `counter` and every counter used by the call must fit in a u32. Counter blocks under the same
+#! `K_CTR` must not repeat.
+@locals(36)
 pub proc encrypt_felts_expanded
+    # Validate the complete input and output ranges before the full-block or tail path writes.
+    dup.4 exec.assert_aead_pointer loc_store.28
+    dup.5 exec.assert_aead_pointer loc_store.29
+    dup.6 u32assert.err="AEAD counter must fit in a u32" loc_store.34
+    dup.7 u32assert.err="AEAD plaintext length must fit in a u32" loc_store.30
+
+    loc_load.30 dup u32overflowing_add
+    assertz.err="AEAD ciphertext length exceeds u32"
+    loc_store.31
+
+    # used_blocks = ceil(num_felts / 8). The ciphertext-length check above bounds num_felts, so
+    # adding seven cannot overflow.
+    loc_load.30 u32overflowing_add.7
+    assertz.err="AEAD plaintext length exceeds u32"
+    u32div.8
+    loc_store.35
+
+    loc_load.30 neq.0
+    if.true
+        loc_load.34 loc_load.35 exec.checked_aead_counter_last
+        drop
+
+        loc_load.28 loc_load.30 exec.checked_aead_range_last
+        loc_store.32
+        loc_load.29 loc_load.31 exec.checked_aead_range_last
+        loc_store.33
+
+        locaddr.0 loc_load.32 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+        locaddr.0 loc_load.33 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+
+        # dst_ptr > src_last OR src_ptr > dst_last
+        loc_load.29 loc_load.32 u32gt
+        loc_load.28 loc_load.33 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+    end
+
     movup.7
     u32divmod.8
     swap
@@ -738,11 +889,11 @@ pub proc encrypt_felts_expanded
     end
 end
 
-#! Decrypts and authenticates expanded ciphertext using advice plaintext.
+#! Decrypts and authenticates expanded ciphertext using a host-supplied plaintext witness.
 #!
-#! The plaintext is nondeterministic advice. This procedure verifies it by
-#! re-encrypting into `scratch_ptr`, comparing the regenerated ciphertext with
-#! the input ciphertext, and checking the tag over the input ciphertext.
+#! The core-library event handler authenticates and decrypts the input, then supplies the plaintext
+#! as nondeterministic advice. This procedure independently checks the tag and verifies that witness
+#! by re-encrypting into `scratch_ptr` and comparing the regenerated ciphertext with the input.
 #!
 #! Input:  [key(4), nonce(4), src_ptr, dst_ptr, num_felts, scratch_ptr, ...]
 #! Output: [...]
@@ -751,10 +902,13 @@ end
 #! - `src_ptr` points to `2 * num_felts` ciphertext-limb Felts followed by
 #!   `tag(2)`.
 #! - `dst_ptr` receives `num_felts` plaintext Felts from advice.
-#! - Advice supplies plaintext Felts in memory order; the first `adv_push`
-#!   returns the first plaintext Felt.
-#! - `scratch_ptr` must fit the regenerated ciphertext and MAC scratch stream.
-@locals(12)
+#! - The host must register the core-library event handlers.
+#!
+#! All three pointers must be word-aligned. The procedure rejects address overflow and overlap
+#! among the source range (including its tag), destination range, and scratch range. All non-empty
+#! ranges must stay below the procedure's local frame. `dst_ptr` must provide `num_felts` writable
+#! Felts, and `scratch_ptr` must provide at least `max(16, 2 * num_felts)` writable Felts.
+@locals(16)
 pub proc decrypt_empty_ad
     loc_storew_le.0
     dropw
@@ -764,6 +918,72 @@ pub proc decrypt_empty_ad
     loc_store.9
     loc_store.10
     loc_store.11
+    # => [...]
+
+    loc_load.8 exec.assert_aead_pointer drop
+    loc_load.9 exec.assert_aead_pointer drop
+    loc_load.11 exec.assert_aead_pointer drop
+    loc_load.10 u32assert.err="AEAD plaintext length must fit in a u32" drop
+
+    # ciphertext_len = 2 * num_felts
+    loc_load.10 dup u32overflowing_add
+    assertz.err="AEAD ciphertext length exceeds u32"
+    loc_store.15
+
+    # source_last = src_ptr + ciphertext_len + tag_len - 1
+    loc_load.8
+    loc_load.15 u32overflowing_add.1
+    assertz.err="AEAD source range exceeds u32"
+    u32overflowing_add
+    assertz.err="AEAD memory range exceeds the u32 address space"
+    loc_store.12
+
+    # scratch_last = scratch_ptr + max(16, ciphertext_len) - 1
+    loc_load.11
+    loc_load.15 push.16 u32max
+    exec.checked_aead_range_last
+    loc_store.14
+
+    locaddr.0 loc_load.12 u32gt
+    assert.err="AEAD memory ranges must stay below the local frame"
+    locaddr.0 loc_load.14 u32gt
+    assert.err="AEAD memory ranges must stay below the local frame"
+
+    # Source and scratch are always non-empty.
+    # scratch_ptr > source_last OR src_ptr > scratch_last
+    loc_load.11 loc_load.12 u32gt
+    loc_load.8 loc_load.14 u32gt
+    or assert.err="AEAD memory ranges must not overlap"
+
+    # The destination range is empty when num_felts is zero.
+    loc_load.10 neq.0
+    if.true
+        # destination_last = dst_ptr + num_felts - 1
+        loc_load.9 loc_load.10 exec.checked_aead_range_last
+        loc_store.13
+        locaddr.0 loc_load.13 u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+
+        # dst_ptr > source_last OR src_ptr > destination_last
+        loc_load.9 loc_load.12 u32gt
+        loc_load.8 loc_load.13 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+
+        # scratch_ptr > destination_last OR dst_ptr > scratch_last
+        loc_load.11 loc_load.13 u32gt
+        loc_load.9 loc_load.14 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+    end
+
+    # Rebuild the public stack ABI for the host handler after validating every range.
+    loc_load.11
+    loc_load.10
+    loc_load.9
+    loc_load.8
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
+    emit.AEAD_DECRYPT_EMPTY_AD_EVENT
+    dropw dropw drop drop drop drop
     # => [...]
 
     # Authenticate the input ciphertext and tag before using advice plaintext.

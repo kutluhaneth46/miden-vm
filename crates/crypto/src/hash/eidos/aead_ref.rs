@@ -1,8 +1,9 @@
 //! Reference model for the Eidos u32-XOR AEAD stream.
 //!
-//! This module is for tests and vector generation. It does not manage nonces. Production callers
-//! must never reuse `(key, nonce)` and must not repeat counter blocks under a fixed CTR key. The
-//! low-level decryption helper does not authenticate; callers that need plaintext must use
+//! This module implements the stream and authentication contract used by the VM helpers. It does
+//! not manage nonces. Callers must never reuse `(key, nonce)` and must not repeat counter blocks
+//! under a fixed CTR key. The low-level decryption helper does not authenticate; callers that need
+//! plaintext must use
 //! [`decrypt_felts_expanded_authenticated`](crate::hash::eidos::aead_ref::decrypt_felts_expanded_authenticated).
 
 use alloc::vec::Vec;
@@ -18,7 +19,7 @@ pub const AEAD_CTR_DOMAIN: u32 = 0x000a_ead0;
 /// Domain for deriving the AEAD MAC key.
 pub const AEAD_MAC_DOMAIN: u32 = 0x000a_ead1;
 
-const FELTS_PER_CTR_BLOCK: usize = 4;
+const FELTS_PER_CTR_BLOCK: usize = 8;
 const LIMBS_PER_CTR_BLOCK: usize = 2 * FELTS_PER_CTR_BLOCK;
 const MAC_BATCH_FELTS: usize = 8;
 
@@ -47,13 +48,16 @@ pub fn derive_mac_key(key: Word, nonce: Word) -> Word {
     Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
 }
 
-/// Returns eight raw u32 keystream limbs for one counter block.
-pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 8] {
+/// Returns sixteen raw u32 keystream limbs for one counter block.
+///
+/// The compression block is `[counter, 0, 0, 0, 0, 0, 0, 0]`. All sixteen XOF lanes are used,
+/// matching the VM's `crypto_stream` instruction.
+pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
     let cv = encoding::word_to_cv(ctr_key);
     let mut counter_block = [Felt::ZERO; 8];
     counter_block[0] = Felt::from_u32(counter);
 
-    compression::compress_raw_cv(cv, encoding::encode_felt_block(&counter_block))
+    compression::compress_xof_cv(cv, encoding::encode_felt_block(&counter_block))
 }
 
 /// Encrypts canonical field elements as expanded u32 limbs.
@@ -298,8 +302,8 @@ mod tests {
             Felt::from_u32(0x28e5_c557),
             Felt::from_u32(0x59fc_5080),
             Felt::from_u32(0x7896_8ab9),
-            Felt::from_u32(0x8616_0fdd),
-            Felt::from_u32(0x6cf8_c822),
+            Felt::from_u32(0xf4e7_e3cc),
+            Felt::from_u32(0xb60d_4482),
         ];
 
         assert_eq!(ciphertext, expected);
@@ -319,8 +323,8 @@ mod tests {
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let tag = auth_tag_expanded(key(), nonce(), &associated_data, &ciphertext);
         let expected = [
-            Felt::new_unchecked(6127600617032766561),
-            Felt::new_unchecked(13291603915237176549),
+            Felt::new_unchecked(4974143255066250443),
+            Felt::new_unchecked(9849528975003196559),
         ];
 
         assert_eq!(tag, expected);
