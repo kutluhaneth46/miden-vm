@@ -472,8 +472,11 @@ mod tests {
 
     #[test]
     fn eidos_hasher_replay_variants_round_trip() {
+        let compression = HasherOp::Compress([Felt::new_unchecked(11); STATE_WIDTH]);
+        assert_eq!(compression.to_bytes()[0], 0, "compression replay tag is wire-pinned");
+
         for op in [
-            HasherOp::BCompress([Felt::new_unchecked(11); STATE_WIDTH]),
+            compression,
             HasherOp::AeadXof(
                 ContextId::root(),
                 RowIndex::from(12u32),
@@ -524,7 +527,7 @@ impl Deserializable for HasherResponseReplay {
 impl Serializable for HasherOp {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::BCompress(state) => {
+            Self::Compress(state) => {
                 0u8.write_into(target);
                 state.write_into(target);
             },
@@ -567,7 +570,7 @@ impl Serializable for HasherOp {
 impl Deserializable for HasherOp {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         match u8::read_from(source)? {
-            0 => Ok(Self::BCompress(<[Felt; STATE_WIDTH]>::read_from(source)?)),
+            0 => Ok(Self::Compress(<[Felt; STATE_WIDTH]>::read_from(source)?)),
             1 => Ok(Self::HashControlBlock((
                 Word::read_from(source)?,
                 Word::read_from(source)?,

@@ -143,7 +143,7 @@ fn padding_subtrees_share_one_vector() {
 }
 
 /// From-scratch segment oracle over the structured sample: hash the ASSEMBLED stream's
-/// two segments with plain `hash_elements` (no resumed sponge state) and pin them
+/// two segments with plain `hash_elements` (no resumed chaining value) and pin them
 /// against the factory's commitments, plus common-section byte-identity against the
 /// canonical order. The factory serves ONE cached common digest to every order, so the
 /// encode-vs-assembled dual paths are definitionally blind to order-dependent bytes

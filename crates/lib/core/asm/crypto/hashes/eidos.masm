@@ -1,9 +1,9 @@
 # ===== EIDOS HASH PROCEDURES ===================================================================
 
-#! Eidos hash helpers built on the VM-native BlakeG compression operation.
+#! Eidos hash helpers built on the VM-native Eidos compression operation.
 #!
 #! Procedures which operate on a three-word state use the layout `[BLOCK_LO, BLOCK_HI, CV]`.
-#! After `bcompress`, `CV` contains the new digest.
+#! After `compress`, `CV` contains the updated chaining word.
 
 const EIDOS_INIT_CV_0 = 4280581858871862887
 const EIDOS_INIT_CV_1 = 2688637133034287986
@@ -37,18 +37,20 @@ pub proc init_chaining_word_in_domain
     # => [CV, ...]
 end
 
-#! Performs one BlakeG compression.
+#! Performs one Eidos compression.
 #!
 #! Input:  [BLOCK_LO, BLOCK_HI, CV, ...]
-#! Output: [BLOCK_LO, BLOCK_HI, DIGEST, ...]
+#! Output: [BLOCK_LO, BLOCK_HI, CV', ...]
 pub proc compress
-    bcompress
+    compress
 end
 
-#! Extracts the digest from a post-compression state.
+#! Returns the current chaining word from a three-word state by dropping the two block words.
 #!
-#! Input:  [BLOCK_LO, BLOCK_HI, DIGEST, ...]
-#! Output: [DIGEST, ...]
+#! The returned word is a final digest only after the framed Eidos schedule is complete.
+#!
+#! Input:  [BLOCK_LO, BLOCK_HI, CV, ...]
+#! Output: [CV, ...]
 pub proc digest
     dropw
     dropw
@@ -68,18 +70,19 @@ pub proc init_no_padding
     padw padw padw
 end
 
-#! Copies the digest to the top of the stack.
+#! Copies the current chaining word to the top of the stack.
 #!
 #! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
-#! execution.
+#! execution. The copied word is a final digest only after the framed Eidos schedule is complete.
 #!
 #! Input: [BLOCK_LO, BLOCK_HI, CV, ...]
-#! Output: [DIGEST, BLOCK_LO, BLOCK_HI, CV, ...]
+#! Output: [CV_COPY, BLOCK_LO, BLOCK_HI, CV, ...]
 #!
 #! Where:
 #! - `BLOCK_LO` is the first preserved block word (positions 0-3, on top of stack).
 #! - `BLOCK_HI` is the second preserved block word (positions 4-7).
-#! - `CV` is the chaining word / digest (positions 8-11).
+#! - `CV` is the current chaining word (positions 8-11).
+#! - `CV_COPY` is a copy of `CV`.
 pub proc copy_digest
     dupw.2
 end
@@ -96,7 +99,7 @@ end
 #! Where:
 #! - `BLOCK_LO` is the first preserved block word (positions 0-3, on top of stack).
 #! - `BLOCK_HI` is the second preserved block word (positions 4-7).
-#! - `CV` is the chaining word / digest (positions 8-11).
+#! - `CV` is the current chaining word (positions 8-11).
 #!
 pub proc absorb_double_words_from_memory
     dup.13 dup.13 neq
@@ -276,106 +279,106 @@ pub proc hash_elements_with_state
         # notice that drop_counter could be any number from 1 to 7
         push.8 movup.13 sub movdn.12
         # => [BLOCK_LO, BLOCK_HI, CV', drop_counter]
-        # => [a0, a1, a2, a3, b0, b1, b2, b3, C', drop_counter]
+        # => [a0, a1, a2, a3, b0, b1, b2, b3, CV', drop_counter]
 
         ### 0th value ########################################################
 
         # we need to drop the last value anyway, since number of values is not divisible by 8
         # push the padding 0 on to the stack
         movup.7 drop push.0
-        # => [0, a0, a1, a2, a3, b0, b1, b2, C', drop_counter]
+        # => [0, a0, a1, a2, a3, b0, b1, b2, CV', drop_counter]
 
         ### 1st value ########################################################
 
         # bring b2 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+        # => [b2, 0, 0, a0, a1, a2, a3, b0, b1, CV', drop_counter]
 
         # push latch variable onto the stack; this will be the control for the cdrop instruction
         push.0
-        # => [latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+        # => [latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, CV', drop_counter]
 
         # get the flag whether the drop counter is equal 1
         dup.14 eq.1
-        # => [drop_counter==1, latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+        # => [drop_counter==1, latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, CV', drop_counter]
 
         # update the latch: if drop_counter == 1, latch will become 1
         or
-        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, CV', drop_counter]
 
         # save the latch value
         dup movdn.14
-        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, CV', latch', drop_counter]
 
         # if latch == 1, keep 0; otherwise keep b2
         cdrop
-        # => [b2_or_0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
+        # => [b2_or_0, 0, a0, a1, a2, a3, b0, b1, CV', latch', drop_counter]
 
         ### 2nd value ########################################################
 
         # bring b1 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+        # => [b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, CV', latch', drop_counter]
 
         # update latch: if drop_counter == 2, latch becomes 1
         movup.13 dup.14 eq.2 or
         dup movdn.14
-        # => [latch', b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+        # => [latch', b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, CV', latch', drop_counter]
 
         cdrop
-        # => [b1_or_0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+        # => [b1_or_0, b2_or_0, 0, a0, a1, a2, a3, b0, CV', latch', drop_counter]
 
         ### 3rd value ########################################################
 
         # bring b0 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [b0, 0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
+        # => [b0, 0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, CV', latch', drop_counter]
 
         movup.13 dup.14 eq.3 or
         dup movdn.14
         cdrop
-        # => [b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
+        # => [b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, CV', latch', drop_counter]
 
         ### 4th value ########################################################
 
         # bring a3 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [a3, 0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
+        # => [a3, 0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, CV', latch', drop_counter]
 
         movup.13 dup.14 eq.4 or
         dup movdn.14
         cdrop
-        # => [a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
+        # => [a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, CV', latch', drop_counter]
 
         ### 5th value ########################################################
 
         # bring a2 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [a2, 0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
+        # => [a2, 0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, CV', latch', drop_counter]
 
         movup.13 dup.14 eq.5 or
         dup movdn.14
         cdrop
-        # => [a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
+        # => [a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, CV', latch', drop_counter]
 
         ### 6th value ########################################################
 
         # bring a1 to top and prepare for cdrop
         movup.7 push.0 swap
-        # => [a1, 0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C', latch', drop_counter]
+        # => [a1, 0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, CV', latch', drop_counter]
 
         movup.13 movup.14 eq.6 or
         cdrop
-        # => [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
+        # => [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, CV']
         # Notice that we don't need to check a0: entering the else branch means that
         # we have number of elements not divisible by 8, so we will have at least one
         # element to hash here (which is a0).
 
         # Reorder to get [BLOCK_LO, BLOCK_HI, CV'] format for compression.
-        # Current: [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
-        # Need:    [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
+        # Current: [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, CV']
+        # Need:    [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, CV']
         movup.7
-        # => [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
+        # => [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, CV']
 
         exec.compress
         # => [BLOCK_LO', BLOCK_HI', CV']
@@ -411,7 +414,7 @@ pub proc hash_elements_with_domain
         # => [CV, ...]
 
         padw padw
-        bcompress
+        compress
         exec.digest
     else
         exec.prepare_hasher_state
@@ -513,6 +516,6 @@ pub proc merge_in_domain
     movup.8 push.8 exec.init_chaining_word_in_domain movdnw.2
     # => [A, B, CV, ...]
 
-    bcompress
+    compress
     exec.digest
 end

@@ -36,8 +36,8 @@ pub mod trace;
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
 /// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
-/// statement; it dispatches per-trace work to Core, Chiplets, BlakeG compression, and byte-pair
-/// lookup AIRs.
+/// statement; it dispatches per-trace work to Core, Chiplets, Eidos compression, and
+/// byte-pair lookup AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
 /// The generic LogUp framework lives in [`crate::lookup`].
 pub mod logup {
@@ -49,8 +49,6 @@ pub mod logup {
 pub use constraints::{
     and8_lookup,
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
-    blakeg_compression,
-    blakeg_compression::{BlakeGCompressionCols, NUM_COLS as NUM_BLAKEG_COMPRESSION_COLS},
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
         AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
@@ -58,19 +56,24 @@ pub use constraints::{
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
+    eidos_compression,
+    eidos_compression::{EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     ext_field::QuadFeltExpr,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
 use constraints::{
-    blakeg_compression::{
+    eidos_compression::{
         constraints::{
             enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
             enforce_inactive_footer_output_aux,
         },
-        lookup::{BLAKEG_LOOKUP_COLUMN_SHAPE, BlakeGCompressionLookupBuilder, emit_lookup_columns},
+        lookup::{
+            EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupBuilder,
+            emit_lookup_columns,
+        },
         periodic::get_periodic_column_values,
-        selectors::BlakeGSelectors,
+        selectors::EidosCompressionSelectors,
     },
     lookup::{
         and8_lookup_air::And8LookupBuilder,
@@ -286,9 +289,9 @@ impl Deserializable for PublicInputs {
 /// [`MidenMultiAir::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
-/// Legacy flattened LogUp width used by constraint test harnesses: 4 core columns, 4 chiplet
-/// columns, and the byte-pair table column. Standalone BlakeG tests size their aux matrix from the
-/// AIR directly.
+/// Combined LogUp width used by constraint test harnesses: 4 core columns, 4 chiplet
+/// columns, and the byte-pair table column. Standalone Eidos compression tests size their aux
+/// matrix from the AIR directly.
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 9;
 
 // `aux_inputs` layout offsets — statement inputs that the AIRs do not read. The fixed program
@@ -500,16 +503,16 @@ impl ChipletsAir {
     }
 }
 
-// BLAKEG COMPRESSION AIR
+// EIDOS COMPRESSION AIR
 // ================================================================================================
 
-/// Standalone BlakeG compression AIR.
+/// Standalone Eidos compression AIR.
 #[derive(Copy, Clone, Debug, Default)]
-pub struct BlakeGCompressionAir;
+pub struct EidosCompressionAir;
 
-impl BlakeGCompressionAir {
+impl EidosCompressionAir {
     fn width(self) -> usize {
-        NUM_BLAKEG_COMPRESSION_COLS
+        NUM_EIDOS_COMPRESSION_COLS
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
@@ -517,7 +520,7 @@ impl BlakeGCompressionAir {
     }
 
     fn aux_width(self) -> usize {
-        BLAKEG_LOOKUP_COLUMN_SHAPE.len()
+        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -528,7 +531,7 @@ impl BlakeGCompressionAir {
     ) -> Result<EF, ReductionError> {
         if !boundary_inputs.is_empty() {
             return Err(format!(
-                "BlakeGCompressionAir expects 0 boundary input slices, got {}",
+                "EidosCompressionAir expects 0 boundary input slices, got {}",
                 boundary_inputs.len()
             )
             .into());
@@ -543,23 +546,23 @@ impl BlakeGCompressionAir {
             let next = main.next_slice();
             let periodic_values: Vec<AB::Expr> =
                 builder.periodic_values().iter().map(|value| (*value).into()).collect();
-            let selectors = BlakeGSelectors::new(&periodic_values, 0);
+            let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
 
             enforce_fused_rows(builder, local, next, &selectors);
             enforce_footer_rows(builder, local, next, &selectors);
             enforce_inactive_footer_input_aux(builder, &selectors);
             enforce_inactive_footer_output_aux(builder, local, &selectors);
         }
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::BlakeGCompression);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
         self.lookup_eval(&mut lb);
     }
 
     fn lookup_num_columns(self) -> usize {
-        BLAKEG_LOOKUP_COLUMN_SHAPE.len()
+        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
-        &BLAKEG_LOOKUP_COLUMN_SHAPE
+        &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
 
     fn lookup_max_message_width(self) -> usize {
@@ -570,13 +573,13 @@ impl BlakeGCompressionAir {
         BusId::COUNT
     }
 
-    fn lookup_eval<LB: BlakeGCompressionLookupBuilder>(self, builder: &mut LB) {
+    fn lookup_eval<LB: EidosCompressionLookupBuilder>(self, builder: &mut LB) {
         let main = builder.main();
-        let local: &BlakeGCompressionCols<_> = main.current_slice().borrow();
-        let next: &BlakeGCompressionCols<_> = main.next_slice().borrow();
+        let local: &EidosCompressionCols<_> = main.current_slice().borrow();
+        let next: &EidosCompressionCols<_> = main.next_slice().borrow();
         let periodic_values: Vec<LB::Expr> =
             builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = BlakeGSelectors::new(&periodic_values, 0);
+        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
 
         emit_lookup_columns(builder, local, next, &selectors);
     }
@@ -593,15 +596,15 @@ pub struct And8LookupAir;
 
 impl And8LookupAir {
     fn width(self) -> usize {
-        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+        and8_lookup::columns::NUM_AND8_LOOKUP_COLS
     }
 
     fn preprocessed_trace(self) -> RowMajorMatrix<Felt> {
-        constraints::and8_lookup::preprocessed_trace()
+        and8_lookup::preprocessed_trace()
     }
 
     fn preprocessed_width(self) -> usize {
-        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
+        and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
     }
 
     fn aux_width(self) -> usize {
@@ -666,21 +669,21 @@ impl And8LookupAir {
 pub enum MidenAir {
     Core,
     Chiplets,
-    BlakeGCompression,
+    EidosCompression,
     And8Lookup,
 }
 
 impl MidenAir {
     pub const CORE: Self = Self::Core;
     pub const CHIPLETS: Self = Self::Chiplets;
-    pub const BLAKEG_COMPRESSION: Self = Self::BlakeGCompression;
+    pub const EIDOS_COMPRESSION: Self = Self::EidosCompression;
     pub const AND8_LOOKUP: Self = Self::And8Lookup;
 
     pub const fn instance_index(self) -> usize {
         match self {
             Self::Core => 0,
             Self::Chiplets => 1,
-            Self::BlakeGCompression => 2,
+            Self::EidosCompression => 2,
             Self::And8Lookup => 3,
         }
     }
@@ -689,7 +692,7 @@ impl MidenAir {
         match self {
             Self::Core => "Core",
             Self::Chiplets => "Chiplets",
-            Self::BlakeGCompression => "BlakeGCompression",
+            Self::EidosCompression => "EidosCompression",
             Self::And8Lookup => "And8Lookup",
         }
     }
@@ -698,7 +701,7 @@ impl MidenAir {
         match self {
             Self::Core => "core",
             Self::Chiplets => "chiplets",
-            Self::BlakeGCompression => "blakeg_compression",
+            Self::EidosCompression => "eidos_compression",
             Self::And8Lookup => "and8_lookup",
         }
     }
@@ -728,8 +731,8 @@ impl MidenAir {
                 public_values,
                 &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
             ),
-            Self::BlakeGCompression => {
-                BlakeGCompressionAir.boundary_correction(challenges, public_values, &[])
+            Self::EidosCompression => {
+                EidosCompressionAir.boundary_correction(challenges, public_values, &[])
             },
             Self::And8Lookup => And8LookupAir.boundary_correction(challenges, public_values, &[]),
         }
@@ -745,7 +748,7 @@ impl MidenAir {
         match self {
             Self::Core => CoreAir.eval(builder),
             Self::Chiplets => ChipletsAir.eval(builder),
-            Self::BlakeGCompression => BlakeGCompressionAir.eval(builder),
+            Self::EidosCompression => EidosCompressionAir.eval(builder),
             Self::And8Lookup => And8LookupAir.eval(builder),
         }
     }
@@ -819,7 +822,7 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.width(),
             Self::Chiplets => ChipletsAir.width(),
-            Self::BlakeGCompression => BlakeGCompressionAir.width(),
+            Self::EidosCompression => EidosCompressionAir.width(),
             Self::And8Lookup => And8LookupAir.width(),
         }
     }
@@ -827,14 +830,14 @@ impl BaseAir<Felt> for MidenAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         match self {
             Self::And8Lookup => Some(And8LookupAir.preprocessed_trace()),
-            Self::Core | Self::Chiplets | Self::BlakeGCompression => None,
+            Self::Core | Self::Chiplets | Self::EidosCompression => None,
         }
     }
 
     fn preprocessed_width(&self) -> usize {
         match self {
             Self::And8Lookup => And8LookupAir.preprocessed_width(),
-            Self::Core | Self::Chiplets | Self::BlakeGCompression => 0,
+            Self::Core | Self::Chiplets | Self::EidosCompression => 0,
         }
     }
 
@@ -846,7 +849,7 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.periodic_columns(),
             Self::Chiplets => ChipletsAir.periodic_columns(),
-            Self::BlakeGCompression => BlakeGCompressionAir.periodic_columns(),
+            Self::EidosCompression => EidosCompressionAir.periodic_columns(),
             Self::And8Lookup => Vec::new(),
         }
     }
@@ -862,7 +865,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core => CoreAir.aux_width(),
             Self::Chiplets => ChipletsAir.aux_width(),
-            Self::BlakeGCompression => BlakeGCompressionAir.aux_width(),
+            Self::EidosCompression => EidosCompressionAir.aux_width(),
             Self::And8Lookup => And8LookupAir.aux_width(),
         }
     }
@@ -891,7 +894,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
         match self {
             Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
-            Self::BlakeGCompression => ConstraintDegrees { base: 3, ext: 3 },
+            Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
             Self::And8Lookup => ConstraintDegrees { base: 0, ext: 2 },
         }
     }
@@ -904,7 +907,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core => constraints::generated::eval_core(builder),
             Self::Chiplets => constraints::generated::eval_chiplets(builder),
-            Self::BlakeGCompression => constraints::generated::eval_blakeg_compression(builder),
+            Self::EidosCompression => constraints::generated::eval_eidos_compression(builder),
             Self::And8Lookup => constraints::generated::eval_and8_lookup(builder),
         }
     }
@@ -914,14 +917,14 @@ impl<LB> LookupAir<LB> for MidenAir
 where
     LB: MainLookupBuilder
         + ChipletLookupBuilder
-        + BlakeGCompressionLookupBuilder
+        + EidosCompressionLookupBuilder
         + And8LookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
             Self::Core => CoreAir.lookup_num_columns(),
             Self::Chiplets => ChipletsAir.lookup_num_columns(),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_num_columns(),
+            Self::EidosCompression => EidosCompressionAir.lookup_num_columns(),
             Self::And8Lookup => And8LookupAir.lookup_num_columns(),
         }
     }
@@ -930,7 +933,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_column_shape(),
             Self::Chiplets => ChipletsAir.lookup_column_shape(),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_column_shape(),
+            Self::EidosCompression => EidosCompressionAir.lookup_column_shape(),
             Self::And8Lookup => And8LookupAir.lookup_column_shape(),
         }
     }
@@ -939,7 +942,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_max_message_width(),
             Self::Chiplets => ChipletsAir.lookup_max_message_width(),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_max_message_width(),
+            Self::EidosCompression => EidosCompressionAir.lookup_max_message_width(),
             Self::And8Lookup => And8LookupAir.lookup_max_message_width(),
         }
     }
@@ -948,7 +951,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_num_bus_ids(),
             Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_num_bus_ids(),
+            Self::EidosCompression => EidosCompressionAir.lookup_num_bus_ids(),
             Self::And8Lookup => And8LookupAir.lookup_num_bus_ids(),
         }
     }
@@ -957,7 +960,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval(builder),
             Self::Chiplets => ChipletsAir.lookup_eval(builder),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_eval(builder),
+            Self::EidosCompression => EidosCompressionAir.lookup_eval(builder),
             Self::And8Lookup => And8LookupAir.lookup_eval(builder),
         }
     }
@@ -969,7 +972,7 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval_boundary(boundary),
             Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
-            Self::BlakeGCompression => BlakeGCompressionAir.lookup_eval_boundary(boundary),
+            Self::EidosCompression => EidosCompressionAir.lookup_eval_boundary(boundary),
             Self::And8Lookup => And8LookupAir.lookup_eval_boundary(boundary),
         }
     }
@@ -983,7 +986,7 @@ where
 /// AIR instances come from [`AIRS`], and the external reduction combines the trace-length-weighted
 /// normalized LogUp sums with the open-bus boundary corrections.
 ///
-/// Instance order is `[Core, Chiplets, BlakeGCompression, And8Lookup]`; every per-AIR slice follows
+/// Instance order is `[Core, Chiplets, EidosCompression, And8Lookup]`; every per-AIR slice follows
 /// that ordering.
 #[derive(Copy, Clone, Debug)]
 pub struct MidenMultiAir;
@@ -1021,7 +1024,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// One rate-aligned block: `[CLAIM_HASH (4) | deferred_root (4)]`, where `CLAIM_HASH` is the
+    /// One complete Eidos block: `[CLAIM_HASH (4) | deferred_root (4)]`, where `CLAIM_HASH` is the
     /// canonical execution-claim commitment (see `miden_core::program::ExecutionClaim`) over
     /// `program_hash ‖ kernel_H ‖ stack_inputs ‖ stack_outputs`. With the relation digest
     /// pre-loaded in the challenger (see `config`), the transcript state after this block
@@ -1282,10 +1285,10 @@ mod tests {
         ];
         let core_values = [normalized_sums[0]];
         let chiplets_values = [normalized_sums[1]];
-        let blakeg_values = [normalized_sums[2]];
+        let eidos_compression_values = [normalized_sums[2]];
         let and8_values = [normalized_sums[3]];
         let aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
-            [&core_values, &chiplets_values, &blakeg_values, &and8_values];
+            [&core_values, &chiplets_values, &eidos_compression_values, &and8_values];
         let log_trace_heights = [6, 9, 7, 16];
 
         let lookup_challenges = Challenges::new(
@@ -1328,12 +1331,12 @@ mod tests {
         let zero = QuadFelt::from(Felt::ZERO);
         let core_aux = [zero];
         let chiplets_aux = [zero];
-        let blakeg_aux = [zero];
+        let eidos_compression_aux = [zero];
         let and8_aux = [zero];
         let aux_values = [
             core_aux.as_slice(),
             chiplets_aux.as_slice(),
-            blakeg_aux.as_slice(),
+            eidos_compression_aux.as_slice(),
             and8_aux.as_slice(),
         ];
 
@@ -1355,12 +1358,12 @@ mod tests {
         let zero = QuadFelt::from(Felt::ZERO);
         let core_aux = [zero];
         let chiplets_aux = [zero];
-        let blakeg_aux = [zero];
+        let eidos_compression_aux = [zero];
         let and8_aux = [zero];
         let aux_values = [
             core_aux.as_slice(),
             chiplets_aux.as_slice(),
-            blakeg_aux.as_slice(),
+            eidos_compression_aux.as_slice(),
             and8_aux.as_slice(),
         ];
 

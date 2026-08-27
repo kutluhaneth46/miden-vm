@@ -196,7 +196,7 @@ where
         // --- Degree-5 flags (opcodes 80-95) ---
         // Uses extra[0] = b6*(1-b5)*b4 (degree 3), discriminated by [b0, b1, b2, b3].
         // Index = b3*8 + b2*4 + b1*2 + b0:
-        // - 0: BCOMPRESS      -  1: MPVERIFY
+        // - 0: COMPRESS      -  1: MPVERIFY
         // - 2: PIPE           -  3: MSTREAM
         // - 4: SPLIT          -  5: LOOP
         // - 6: SPAN           -  7: JOIN
@@ -329,8 +329,8 @@ where
         let no_shift_depth0 = E::sum_array::<15>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
-            // +BCOMPRESS    - preserves the 8-felt block and updates only the CV
-            op5(opcodes::BCOMPRESS),
+            // +COMPRESS    - preserves the 8-felt block and updates only the CV
+            op5(opcodes::COMPRESS),
             // +U32ASSERT2   - checks s0,s1 are u32, no change
             op6(opcodes::U32ASSERT2),
             // +MPVERIFY     - verifies Merkle path in place
@@ -398,8 +398,8 @@ where
             + op7(opcodes::SWAPW)
             // +PIPE|MSTREAM   - overwrite s0..s7 and cursor at s12
             + stream_word.clone()
-            // -BCOMPRESS      - updates the CV at depths 8..11
-            - op5(opcodes::BCOMPRESS)
+            // -COMPRESS      - updates the CV at depths 8..11
+            - op5(opcodes::COMPRESS)
             // -SWAPW2         - target range s8..s11 is affected by SWAPW2 only
             - swapw2.clone();
 
@@ -408,8 +408,8 @@ where
             = swapw2
             // -SWAPW3       - SWAPW3 leaves at s12
             - swapw3
-            // +BCOMPRESS     - preserves the stack tail above the CV
-            + op5(opcodes::BCOMPRESS)
+            // +COMPRESS     - preserves the stack tail above the CV
+            + op5(opcodes::COMPRESS)
             // +LOGDEFERRED   - writes only s0..s11
             + op5(opcodes::LOGDEFERRED)
             // -PIPE|MSTREAM - cursor at s12 is updated

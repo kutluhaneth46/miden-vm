@@ -134,10 +134,10 @@ pub trait Tracer {
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records the result of a block-preserving BlakeG compression.
+    /// Records the result of a block-preserving Eidos compression.
     ///
-    /// Called by: `BCOMPRESS`, `LOG_DEFERRED`.
-    fn record_hasher_bcompress(
+    /// Called by: `COMPRESS`, `LOG_DEFERRED`.
+    fn record_hasher_compress(
         &mut self,
         _input_state: [Felt; STATE_WIDTH],
         _output_state: [Felt; STATE_WIDTH],
@@ -463,10 +463,10 @@ pub enum OperationHelperRegisters {
     /// The helper registers hold the four 16-bit limbs of `second` and `first` (used for range
     /// checking).
     U32Assert2 { first: Felt, second: Felt },
-    /// Helper for the `BCOMPRESS` operation.
+    /// Helper for the `COMPRESS` operation.
     ///
     /// - `addr`: the address in the hasher chiplet where the compression is recorded.
-    BCompress { addr: Felt },
+    Compress { addr: Felt },
     /// Helper for Merkle path operations (`MPVERIFY` and `MRUPDATE`), which verify or update a
     /// node in a Merkle tree.
     ///
@@ -495,11 +495,11 @@ pub enum OperationHelperRegisters {
     ///   coefficients: `(acc * alpha + s[0]) * alpha + s[1]`.
     HornerEvalExt { alpha: QuadFelt, acc_tmp: QuadFelt },
     /// Helper for the `LOG_DEFERRED` operation, which folds a verified statement digest into
-    /// the rolling deferred root via the VM hasher (BlakeG compression).
+    /// the rolling deferred root via the VM hasher (Eidos compression).
     ///
     /// - `addr`: address in the hasher chiplet where the compression is recorded.
     /// - `state_prev`: the previous deferred root, provided non-deterministically and used as the
-    ///   rate0 input to the compression.
+    ///   low block word of the compression.
     LogDeferred { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
@@ -629,7 +629,7 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::BCompress { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::Compress { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
             Self::MerklePath { addr, index } => {
                 let (direction_bit, y_limbs) = merkle_index_helper_values(*index);
                 [

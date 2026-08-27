@@ -1,13 +1,13 @@
-//! Local BLAKE3 compression schedule used by BlakeG.
+//! Local BLAKE3 compression schedule used by Eidos.
 //!
 //! This module owns only the raw BLAKE3 round schedule and architecture-specific packed
-//! backends. BlakeG output masking, field packing, and Eidos framing stay in `primitive.rs`
-//! and `framing.rs`.
+//! backends. Eidos compression output masking, field packing, and Eidos framing stay in
+//! `primitive.rs` and `framing.rs`.
 //!
 //! TODO(upstream-blake3): replace this module with a stable word-oriented `compress_many`
 //! hazmat API that accepts batches of 8-word CVs, 16-word message blocks, and caller-supplied
 //! parameter words for `v[12..16]`, returning either the post-round state or the raw CV/XOF
-//! folds before BlakeG applies its output mask.
+//! folds before Eidos applies its output mask.
 
 use core::array;
 
@@ -167,13 +167,13 @@ fn permuted_state_with_parameter_words(
     v
 }
 
-/// Returns the raw eight-word CV fold with BlakeG's fixed parameter words.
+/// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
     let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
     array::from_fn(|i| v[i] ^ v[i + 8])
 }
 
-/// Returns the raw 16-word XOF fold with BlakeG's fixed parameter words.
+/// Returns the raw 16-word XOF fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
     array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })

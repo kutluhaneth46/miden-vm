@@ -4319,12 +4319,12 @@ pub fn eval_chiplets<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     builder.assert_zero_ext(e1404.dup());
 }
 
-/// Generated globally-CSE'd evaluator for `MidenAir::BlakeGCompression`.
+/// Generated globally-CSE'd evaluator for `MidenAir::EidosCompression`.
 ///
 /// Emits constraints in the exact global order of the hand-written `eval`,
 /// with each node's `let` placed at its first use.
 #[inline(never)]
-pub fn eval_blakeg_compression<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+pub fn eval_eidos_compression<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let main = builder.main();
     let m0 = main.current_slice();
     let m1 = main.next_slice();

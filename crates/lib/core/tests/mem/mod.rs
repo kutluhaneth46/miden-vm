@@ -4,7 +4,7 @@ use miden_processor::{
     trace::RowIndex,
 };
 use miden_utils_testing::{
-    AdviceStack, build_expected_bcompress, build_expected_hash, felt_slice_to_ints,
+    AdviceStack, build_expected_compress, build_expected_hash, felt_slice_to_ints,
 };
 
 #[test]
@@ -234,7 +234,7 @@ fn test_pipe_double_words_to_memory() {
 
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
-    let compressed = build_expected_bcompress(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]);
+    let compressed = build_expected_compress(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]);
     let expected_state = [
         Felt::new_unchecked(1),
         Felt::new_unchecked(2),

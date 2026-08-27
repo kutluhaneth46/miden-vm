@@ -86,7 +86,7 @@ fn hook_source() -> String {
 }
 
 /// A deliberately straightforward transcript path: consume the same seven advice words through
-/// the public buffered word API, compressing three full Eidos rate blocks and buffering one word.
+/// the public buffered word API, compressing three complete Eidos blocks and buffering one word.
 fn reference_source() -> String {
     format!(
         r#"
@@ -242,7 +242,7 @@ fn valid_sigmas(correction: QuadFelt) -> [Vec<QuadFelt>; 10] {
     });
 
     // Reserve a single-width AIR as the balancing term, then mirror MultiAir::eval_external:
-    // the second BlakeG and BytePairAnd8 values use the centered sigma-prime convention.
+    // the second EidosCompression and BytePairAnd8 values use the centered sigma-prime convention.
     sigmas[9][0] = QuadFelt::ZERO;
     let partial = sigmas.iter().enumerate().fold(QuadFelt::ZERO, |sum, (index, values)| {
         if matches!(index, 1 | 3) {

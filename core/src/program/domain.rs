@@ -10,13 +10,12 @@
 //!
 //! with `domain_id` a registered 24-bit integer (`>= 1`) and `version` an 8-bit per-domain
 //! version (`>= 1`). Eidos incorporates the selector and exact input length into its initial
-//! BlakeG chaining value through `hash_elements_in_domain`.
+//! Eidos chaining value through `hash_elements_in_domain`.
 //!
 //! # Provisional registry entries
 //!
 //! The RFC's draft registry allocates `0x010000..0x01ffff` to miden-vm, with concrete entries
-//! delegated to this repository. These are the range's first entries, to be migrated into the
-//! machine-readable registry when it lands:
+//! delegated to this repository. This module assigns the following entries within that range:
 //!
 //! | domain_id  | version | domain |
 //! |------------|---------|-------------------------------------------|

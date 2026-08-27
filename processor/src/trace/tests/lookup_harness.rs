@@ -49,21 +49,22 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &VmTrace) -> Self {
-        let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
+        let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
             trace.main_trace().to_air_matrices();
-        Self::from_air_matrices(&core_matrix, &chip_matrix, &blakeg_matrix, &and8_matrix)
+        Self::from_air_matrices(&core_matrix, &chip_matrix, &eidos_compression_matrix, &and8_matrix)
     }
 
     /// Drive the prover-path lookup emitters with caller-supplied per-AIR trace matrices.
     pub(super) fn from_air_matrices(
         core_matrix: &RowMajorMatrix<Felt>,
         chip_matrix: &RowMajorMatrix<Felt>,
-        blakeg_matrix: &RowMajorMatrix<Felt>,
+        eidos_compression_matrix: &RowMajorMatrix<Felt>,
         and8_matrix: &RowMajorMatrix<Felt>,
     ) -> Self {
         // Core has no periodic columns.
         let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
-        let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+        let eidos_compression_periodic =
+            BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
         let and8_preprocessed = MidenAir::AND8_LOOKUP
             .preprocessed_trace()
             .expect("AND8 lookup AIR declares a preprocessed table");
@@ -84,11 +85,11 @@ impl InteractionLog {
             &chip_periodic,
             &challenges,
         );
-        let blakeg_fractions = build_lookup_fractions(
-            &MidenAir::BLAKEG_COMPRESSION,
-            blakeg_matrix,
+        let eidos_compression_fractions = build_lookup_fractions(
+            &MidenAir::EIDOS_COMPRESSION,
+            eidos_compression_matrix,
             None,
-            &blakeg_periodic,
+            &eidos_compression_periodic,
             &challenges,
         );
         let and8_fractions = build_lookup_fractions(
@@ -101,7 +102,7 @@ impl InteractionLog {
         let rows = merge_rows(vec![
             split_rows(&core_fractions),
             split_rows(&chip_fractions),
-            split_rows(&blakeg_fractions),
+            split_rows(&eidos_compression_fractions),
             split_rows(&and8_fractions),
         ]);
 

@@ -131,11 +131,11 @@ impl Prover {
         let params = config::pcs_params();
         tracing::event!(
             tracing::Level::INFO,
-            "Generated execution traces: core={}, chiplets={}, blakeg={}, and8={}, padded={}, \
+            "Generated execution traces: core={}, chiplets={}, eidos_compression={}, and8={}, padded={}, \
              estimated_prover_memory_bytes={:?}",
             trace_len_summary.core_rows(),
             trace_len_summary.chiplets_rows(),
-            trace_len_summary.blakeg_compression_rows(),
+            trace_len_summary.eidos_compression_rows(),
             trace_len_summary.byte_pair_lookup_rows(),
             trace_len_summary.padded_trace_len(),
             trace_len_summary.prover_memory_bytes(&params)
@@ -143,7 +143,8 @@ impl Prover {
 
         let precompile_root = trace.precompile_root();
         let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-        let (core_matrix, chiplets_matrix, blakeg_matrix, and8_matrix) = trace.into_air_matrices();
+        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
+            trace.into_air_matrices();
 
         let proof_bytes = match self.hash_fn {
             HashFunction::Blake3_256 => {
@@ -152,7 +153,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,
@@ -164,7 +165,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,
@@ -176,7 +177,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,
@@ -188,7 +189,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,
@@ -200,7 +201,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,
@@ -212,7 +213,7 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    blakeg_matrix,
+                    eidos_compression_matrix,
                     and8_matrix,
                     &public_values,
                     &aux_inputs,

@@ -2,7 +2,7 @@
 //!
 //! This module enforces the non-bus stack constraints for crypto-related operations:
 //!
-//! - **AEADSTREAM**: Encrypts two plaintext words with a BlakeG-XOF keystream. Constraints here
+//! - **AEADSTREAM**: Encrypts two plaintext words with an Eidos XOF keystream. Constraints here
 //!   enforce the stack transition; the AEAD stream chip handles memory I/O and byte-level XOR.
 //!
 //! - **HORNERBASE**: Evaluates a polynomial with base-field coefficients at an extension-field

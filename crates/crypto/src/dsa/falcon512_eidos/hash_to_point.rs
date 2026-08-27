@@ -23,11 +23,11 @@ pub fn hash_to_point_eidos(message: Word, nonce: &Nonce) -> Polynomial<FalconFel
     let nonce_elements = nonce.to_elements();
 
     let mut cv = Eidos::init_chaining_word(FALCON_H2P_DOMAIN, 0);
-    cv = Eidos::compress_block(cv, nonce_elements);
+    cv = Eidos::compress(cv, nonce_elements);
 
     let mut block = [ZERO; 8];
     block[..Word::NUM_ELEMENTS].copy_from_slice(message.as_slice());
-    cv = Eidos::compress_block(cv, block);
+    cv = Eidos::compress(cv, block);
 
     // squeeze the coefficients of the polynomial
     let block = [ZERO; 8];
@@ -35,7 +35,7 @@ pub fn hash_to_point_eidos(message: Word, nonce: &Nonce) -> Polynomial<FalconFel
     for _ in 0..128 {
         // Each Eidos output element is reduced modulo the Falcon prime. This is biased, but keeps
         // hash-to-point branch-free and matches this deterministic Falcon-Eidos instantiation.
-        cv = Eidos::compress_block(cv, block);
+        cv = Eidos::compress(cv, block);
         cv.iter().for_each(|value| coefficients.push(felt_to_falcon_felt(*value)));
     }
 

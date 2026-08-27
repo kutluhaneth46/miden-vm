@@ -21,6 +21,6 @@ pub proc process_row_ood_evaluations
     repeat.OOD_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end

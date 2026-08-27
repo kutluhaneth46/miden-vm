@@ -61,7 +61,7 @@ const DATA_N_CHUNKS_OFFSET: usize = 6;
 
 /// Number of field elements occupied by a deferred node tag.
 const TAG_NUM_ELEMENTS: usize = 4;
-/// Number of field elements in one rate-sized deferred payload block.
+/// Number of field elements in one deferred payload block.
 const PAYLOAD_BLOCK_NUM_ELEMENTS: usize = 8;
 
 /// Returns the storage footprint of `tag || n` 8-felt payload blocks.
@@ -258,7 +258,7 @@ pub(super) fn handle_deferred_register_data(
     if end > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: end }.into());
     }
-    // Read `n` rate-sized payload blocks from memory.
+    // Read `n` eight-Felt payload blocks from memory.
     let ctx = processor.ctx;
     let mut chunks: Vec<DataChunk> = Vec::with_capacity(n as usize);
     for k in 0..n {

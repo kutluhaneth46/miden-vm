@@ -47,7 +47,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let totals = TraceTotals {
         core_rows: summary.core_rows() as u64,
         chiplets_rows: summary.chiplets_rows() as u64,
-        blakeg_compression_rows: summary.blakeg_compression_rows() as u64,
+        eidos_compression_rows: summary.eidos_compression_rows() as u64,
         byte_pair_lookup_rows: summary.byte_pair_lookup_rows() as u64,
     };
 
@@ -64,7 +64,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let processor_padded = summary
         .core_height()
         .max(summary.chiplets_height())
-        .max(summary.blakeg_compression_height())
+        .max(summary.eidos_compression_height())
         .max(summary.byte_pair_lookup_rows()) as u64;
     if derived_padded != processor_padded {
         return Err(MeasurementError::InvariantDrift {
@@ -104,7 +104,7 @@ pub enum MeasurementError {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IterCost {
     pub core: f64,
-    pub hasher: f64,
+    pub eidos_compression: f64,
     pub bitwise: f64,
     pub chiplets: f64,
     pub memory: f64,
@@ -114,7 +114,7 @@ impl IterCost {
     pub fn get(&self, component: Component) -> f64 {
         match component {
             Component::Core => self.core,
-            Component::Hasher => self.hasher,
+            Component::EidosCompression => self.eidos_compression,
             Component::Chiplets => self.chiplets,
             Component::Memory => self.memory,
         }
@@ -141,7 +141,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
     let k = iters as f64;
     IterCost {
         core: shape.totals.core_rows as f64 / k,
-        hasher: shape.hasher_work_rows() as f64 / k,
+        eidos_compression: shape.totals.eidos_compression_rows as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
         // The chiplets trace always contains one structural padding row. It is an intercept, not
         // work contributed by any snippet, so exclude it from the per-iteration rate.
@@ -169,16 +169,15 @@ mod tests {
     }
 
     #[test]
-    fn bcompress_adds_rows_beyond_baseline() {
+    fn compress_adds_rows_beyond_baseline() {
         let baseline = measure_program("begin push.1 drop end").expect("baseline");
-        let with_bcompress =
-            measure_program("begin padw padw padw bcompress dropw dropw dropw end")
-                .expect("bcompress");
+        let with_compress = measure_program("begin padw padw padw compress dropw dropw dropw end")
+            .expect("compress");
         assert!(
-            with_bcompress.hasher_work_rows() > baseline.hasher_work_rows(),
-            "bcompress should add hasher work above the baseline ({} vs {})",
-            with_bcompress.hasher_work_rows(),
-            baseline.hasher_work_rows(),
+            with_compress.totals.eidos_compression_rows > baseline.totals.eidos_compression_rows,
+            "compress should add Eidos compression rows above the baseline ({} vs {})",
+            with_compress.totals.eidos_compression_rows,
+            baseline.totals.eidos_compression_rows,
         );
     }
 
@@ -198,15 +197,15 @@ mod tests {
     }
 
     #[test]
-    fn hasher_snippet_is_hasher_dominant() {
+    fn compression_snippet_is_compression_dominant() {
         let c = cal();
-        let hasher = c["hasher"];
+        let compression = c["eidos_compression"];
         let pad = c["decoder_pad"];
         assert!(
-            hasher.hasher > pad.hasher * 10.0,
-            "hasher/iter ({}) not dominant over decoder_pad leak ({})",
-            hasher.hasher,
-            pad.hasher,
+            compression.eidos_compression > pad.eidos_compression * 10.0,
+            "compression rows/iter ({}) not dominant over decoder_pad leak ({})",
+            compression.eidos_compression,
+            pad.eidos_compression,
         );
     }
 
@@ -238,10 +237,10 @@ mod tests {
         let pad = c["decoder_pad"];
         assert!(pad.core > 1.0, "decoder_pad core/iter should be > 1.0");
         assert!(
-            pad.core > pad.hasher,
-            "decoder_pad core ({}) should dominate hasher ({})",
+            pad.core > pad.eidos_compression,
+            "decoder_pad core ({}) should dominate Eidos compression ({})",
             pad.core,
-            pad.hasher,
+            pad.eidos_compression,
         );
     }
 }

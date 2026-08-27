@@ -371,7 +371,7 @@ fn test_masm_errors_consistency(
 /// Tests that `log_deferred` folds a statement word into the rolling deferred root.
 #[test]
 fn test_log_deferred_correctness() {
-    use miden_core::{chiplets::blakeg, deferred::TRUE_DIGEST};
+    use miden_core::{chiplets::eidos_compression, deferred::TRUE_DIGEST};
 
     // The opcode reads STMNT from stack[4..8] and writes STATE_NEW to stack[0..4].
     // `log_deferred` only accepts a registered statement that evaluates to TRUE. The framework
@@ -382,13 +382,13 @@ fn test_log_deferred_correctness() {
     let stmnt = TRUE_DIGEST;
     let state_prev = Word::empty();
 
-    // Hasher input: [STATE_PREV, STMNT, Eidos merge CV].
+    // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].
     let mut hasher_state = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(state_prev.as_slice());
     hasher_state[4..8].copy_from_slice(stmnt.as_slice());
-    hasher_state[8..12].copy_from_slice(miden_core::deferred::DEFERRED_ROOT_DOMAIN.as_slice());
+    hasher_state[8..12].copy_from_slice(miden_core::deferred::DEFERRED_AND_INIT_CV.as_slice());
 
-    blakeg::compress_state(&mut hasher_state);
+    eidos_compression::compress_state(&mut hasher_state);
 
     let expected_state_new: Word = hasher_state[8..12].try_into().unwrap();
 

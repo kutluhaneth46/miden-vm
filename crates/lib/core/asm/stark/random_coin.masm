@@ -57,7 +57,7 @@ pub proc eidos_compress_block
     padw exec.constants::random_coin_cv_ptr mem_loadw_le
     padw exec.constants::random_coin_block_ptr add.4 mem_loadw_le
     padw exec.constants::random_coin_block_ptr mem_loadw_le
-    bcompress
+    compress
     swapw.2
     exec.constants::random_coin_cv_ptr mem_storew_le dropw
     dropw dropw
@@ -71,7 +71,7 @@ pub proc eidos_absorb_block
     padw exec.constants::random_coin_cv_ptr mem_loadw_le
     swapw.2
     swapw
-    bcompress
+    compress
     swapw.2
     exec.constants::random_coin_cv_ptr mem_storew_le dropw
     dropw dropw
@@ -552,7 +552,7 @@ pub proc reseed_with_folding_pow_and_ext
         movup.3 add.6 movdn.3
         swapw.2
         swapw
-        bcompress
+        compress
 
         swapw.2
         exec.constants::random_coin_output_word_ptr mem_storew_le

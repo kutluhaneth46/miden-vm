@@ -16,13 +16,13 @@ use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
         messages::{
-            AceInitMsg, AeadBlakeGInputMsg, AeadStreamRequestMsg, BitwiseMsg, HasherMsg,
+            AceInitMsg, AeadEidosCompressionInputMsg, AeadStreamRequestMsg, BitwiseMsg, HasherMsg,
             KernelRomMsg, MemoryMsg, RangeMsg,
         },
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
-        chiplets::hasher::{CAPACITY_LEN, CONTROLLER_ROWS_PER_HASHER_OP, RATE_LEN},
+        chiplets::hasher::{BLOCK_LEN, CONTROLLER_ROWS_PER_HASHER_OP, CV_LEN},
         log_deferred::{
             HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
         },
@@ -68,7 +68,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Constants reused across BCOMPRESS / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
+    // Constants reused across COMPRESS / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
     // Strides are measured in controller-trace rows.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_HASHER_OP - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_HASHER_OP as u16);
@@ -256,24 +256,24 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         );
                     }
 
-                    // --- BCOMPRESS ---
+                    // --- COMPRESS ---
                     {
                         let last_off = last_off.clone();
                         g.batch(
-                            "bcompress",
-                            op_flags.bcompress(),
+                            "compress",
+                            op_flags.compress(),
                             move |b| {
                                 let helper0: LB::Expr = helper0.into();
                                 let stk_state = array::from_fn(|i| stk.get(i).into());
                                 let cv_next = array::from_fn(|i| stk_next.get(8 + i).into());
                                 b.remove(
-                                    "bcompress_init",
+                                    "compress_init",
                                     HasherMsg::linear_hash_init(helper0.clone(), stk_state),
                                     Deg { v: 5, u: 6 },
                                 );
                                 let return_addr = helper0 + last_off;
                                 b.remove(
-                                    "bcompress_return",
+                                    "compress_return",
                                     HasherMsg::return_hash(return_addr, cv_next),
                                     Deg { v: 5, u: 6 },
                                 );
@@ -495,9 +495,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 }
                             });
                             b.insert(
-                                "aead_blakeg_input",
+                                "aead_eidos_input",
                                 LB::Expr::ONE,
-                                AeadBlakeGInputMsg { clk: clk.into(), state },
+                                AeadEidosCompressionInputMsg { clk: clk.into(), state },
                                 Deg { v: 4, u: 5 },
                             );
                             for (name, src_offset, dst_offset, lane_base) in
@@ -608,21 +608,21 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- LOGDEFERRED ---
                     //
-                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), CV]`.
-                    // The response returns only the new transcript state.
+                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), AND_INIT_CV]`.
+                    // The response returns only the new rolling root.
                     g.batch(
                         "logdeferred",
                         op_flags.log_deferred(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_cv = miden_core::deferred::DEFERRED_ROOT_DOMAIN;
+                            let and_init_cv = miden_core::deferred::DEFERRED_AND_INIT_CV;
                             let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
                                 if i < 4 {
                                     user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
-                                } else if i < RATE_LEN {
-                                    stk.get(STACK_STMNT_RANGE.start + (i - CAPACITY_LEN)).into()
+                                } else if i < BLOCK_LEN {
+                                    stk.get(STACK_STMNT_RANGE.start + (i - CV_LEN)).into()
                                 } else {
-                                    LB::Expr::from(logpre_cv[i - 8])
+                                    LB::Expr::from(and_init_cv[i - 8])
                                 }
                             });
                             let state_new: [LB::Expr; 4] = array::from_fn(|i| {

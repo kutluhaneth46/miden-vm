@@ -175,7 +175,7 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
         opcodes::U32ADD | opcodes::U32SUB | opcodes::U32MUL | opcodes::U32DIV => {
             set(&mut no_shift, 2..16);
         },
-        opcodes::BCOMPRESS => {
+        opcodes::COMPRESS => {
             set(&mut no_shift, 0..8);
             set(&mut no_shift, 12..16);
         },

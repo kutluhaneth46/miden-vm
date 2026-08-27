@@ -2,8 +2,8 @@
 //!
 //! [`ChunkChainMsg`] — the per-invocation chain-binding tuple. Pairs
 //! the chunk-side `chunk_seq_id_head` (chunk-chiplet's native index)
-//! with the `absorption_id_head` (the Eidos cycle where the chain's
-//! `InCap` fires). Provided at every absorption-chain head; consumed
+//! with the `absorption_id_head` (the first Eidos compression cycle in the chain).
+//! Provided at every absorption-chain head; consumed
 //! by hasher-orchestration chiplets (Keccak, …) to bind their
 //! per-invocation `chunk_ptr_head = 4·chunk_seq_id_head` to the
 //! matching Eidos chain. Exposing the chunk-chiplet's native index

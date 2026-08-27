@@ -8,7 +8,7 @@ const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18
 const NUM_CHIPLETS = 10
-const BLAKEG_COMPRESSION_AIR_INDEX = 1
+const EIDOS_COMPRESSION_AIR_INDEX = 1
 const BYTE_PAIR_AND8_AIR_INDEX = 3
 const NUM_AUX_VALUE_WORDS = 6
 
@@ -28,25 +28,25 @@ proc load_normalization_adjustment
     movup.2 mul swap
 end
 
-#! Felt offset of BlakeGCompression's second boundary value in the proof-ordered flat stream.
-proc blakeg_second_value_offset
-    # BytePairAnd8 contributes one extra value before BlakeG iff it has a smaller height.
+#! Felt offset of Eidos compression's second boundary value in the proof-ordered flat stream.
+proc eidos_compression_second_value_offset
+    # BytePairAnd8 contributes one extra value before EidosCompression iff it has a smaller height.
     exec.constants::air_trace_length_logs_ptr add.BYTE_PAIR_AND8_AIR_INDEX mem_load
-    exec.constants::air_trace_length_logs_ptr add.BLAKEG_COMPRESSION_AIR_INDEX mem_load
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
     u32lt
 
     exec.constants::air_trace_length_logs_ptr
     push.NUM_CHIPLETS
-    push.BLAKEG_COMPRESSION_AIR_INDEX
+    push.EIDOS_COMPRESSION_AIR_INDEX
     exec.utils::proof_order_position_from_heights
     add add.1 mul.2
 end
 
 #! Felt offset of BytePairAnd8's second boundary value in the proof-ordered flat stream.
 proc byte_pair_and8_second_value_offset
-    # BlakeG contributes one extra value before BytePairAnd8 when it sorts first. Equal heights
-    # preserve canonical order, where BlakeG's index is smaller.
-    exec.constants::air_trace_length_logs_ptr add.BLAKEG_COMPRESSION_AIR_INDEX mem_load
+    # EidosCompression contributes one extra value before BytePairAnd8 when it sorts first. Equal heights
+    # preserve canonical order, where Eidos compression's index is smaller.
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
     exec.constants::air_trace_length_logs_ptr add.BYTE_PAIR_AND8_AIR_INDEX mem_load
     u32lte
 
@@ -60,7 +60,7 @@ end
 #! Observes the PVM auxiliary trace commitment and its twelve component sigma values.
 #!
 #! The advice provider supplies the commitment followed by each AIR's exposed values in proof
-#! order. Eight AIRs expose one sigma; BlakeGCompression and BytePairAnd8 expose two apiece. The
+#! order. Eight AIRs expose one sigma; EidosCompression and BytePairAnd8 expose two apiece. The
 #! second value of each composite uses Miden's normalized `sigma_prime` convention, so the
 #! verifier locates those two values from the stable height order and weights them by that AIR's
 #! trace length before closing the external LogUp identity.
@@ -129,8 +129,8 @@ pub proc observe_aux_trace
     movup.2 drop
 
     # Lift the two Miden-normalized component residues from sigma_prime to n*sigma_prime.
-    exec.blakeg_second_value_offset
-    exec.constants::air_trace_length_logs_ptr add.BLAKEG_COMPRESSION_AIR_INDEX mem_load
+    exec.eidos_compression_second_value_offset
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
     swap
     exec.load_normalization_adjustment
     ext2add

@@ -155,7 +155,7 @@ A system event is a host hook. Its stack arguments are visible in the VM executi
 host-side state changes are not constrained by the AIR. In particular, a memory-backed register
 event reads `n_chunks` chunks at `ptr` without adding AIR memory accesses that bind the registered
 contents to those cells. A proof-relevant digest must therefore be derived with VM instructions:
-`bcompress` for a stack payload, or `mem_stream` plus `bcompress` for the same tag and ordered
+`compress` for a stack payload, or `mem_stream` plus `compress` for the same tag and ordered
 memory chunk sequence, using the registered Eidos length and domain framing.
 
 This composes with the verifier:

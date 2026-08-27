@@ -15,7 +15,7 @@ use miden::core::mem
 # The deferred root D is not part of the claim: it is the obligation a verified claim hands back.
 #
 # The claim commitment is the domain-tagged sequential hash of the region. 40 felts is exactly
-# five rate blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
+# five Eidos blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
 # resumable by callsites that pin those fields. Mirrors
 # miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
 

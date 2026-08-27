@@ -4,7 +4,7 @@
 //! scenario keys to entries. Each entry supplies provenance metadata and a `trace` section.
 //!
 //! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
-//! `blakeg_compression_rows`, `byte_pair_lookup_rows`). `shape` (nested under `trace`) is an
+//! `eidos_compression_rows`, `byte_pair_lookup_rows`). `shape` (nested under `trace`) is an
 //! advisory per-chiplet breakdown used by the solver. The loader checks
 //! `trace.chiplets_rows == shape.chiplets_sum()`.
 
@@ -16,8 +16,8 @@ use serde::Deserialize;
 /// length changes.
 const MIN_TRACE_LEN: u64 = 64;
 
-/// One BlakeG compression cycle occupies 32 rows.
-const BLAKEG_COMPRESSION_CYCLE_LEN: u64 = 32;
+/// One Eidos compression cycle occupies 32 rows.
+const EIDOS_COMPRESSION_CYCLE_LEN: u64 = 32;
 
 /// One Poseidon2 permutation cycle occupies 16 rows.
 const POSEIDON2_CYCLE_LEN: u64 = 16;
@@ -79,14 +79,9 @@ pub struct Poseidon2SourceTraceTotals {
 }
 
 /// Origin of a snapshot's trace-row counts.
-///
-/// Missing provenance defaults to `ProducerMeasured` for compatibility with producer-generated
-/// snapshots that predate this field. Derived snapshots must opt into the provisional marker
-/// explicitly so benchmark output cannot present them as measurements.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SnapshotProvenance {
-    #[default]
     ProducerMeasured,
     DerivedPendingProducerPort,
 }
@@ -112,11 +107,9 @@ pub struct TraceTotals {
     /// Total chiplets trace length, matching `ChipletsLengths::trace_len` in the processor (sum of
     /// per-chiplet lengths + 1 mandatory padding row).
     pub chiplets_rows: u64,
-    /// BlakeG compression AIR trace length. Legacy snapshots without a separate native-hash AIR
-    /// target use zero.
-    pub blakeg_compression_rows: u64,
-    /// Fixed And8 byte-pair lookup AIR height. Historical snapshots may supply the former
-    /// `range_rows` field; the loader accepts it as a bracket-only compatibility alias.
+    /// Eidos compression AIR trace length.
+    pub eidos_compression_rows: u64,
+    /// Fixed And8 byte-pair lookup AIR height.
     pub byte_pair_lookup_rows: u64,
 }
 
@@ -124,15 +117,14 @@ pub struct TraceTotals {
 /// the synthetic program stays representative (hasher work looks like hasher work, not a pile of
 /// decoder-pad), but the verifier does not treat individual values as hard targets.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TraceBreakdown {
     pub hasher_rows: u64,
     pub bitwise_rows: u64,
     pub memory_rows: u64,
     /// Kernel ROM rows. Not driven independently by the synthetic suite.
-    #[serde(default)]
     pub kernel_rom_rows: u64,
     /// ACE chiplet rows. Not driven independently by the synthetic suite.
-    #[serde(default)]
     pub ace_rows: u64,
 }
 
@@ -159,14 +151,9 @@ impl TraceTotals {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
-    /// Padded power-of-two bracket for the BlakeG compression trace.
-    pub fn padded_blakeg_compression(&self) -> u64 {
-        self.blakeg_compression_rows.next_power_of_two().max(MIN_TRACE_LEN)
-    }
-
-    /// True when the snapshot contains a per-AIR BlakeG compression target.
-    pub fn has_blakeg_compression_target(&self) -> bool {
-        self.blakeg_compression_rows > 0
+    /// Padded power-of-two bracket for the Eidos compression trace.
+    pub fn padded_eidos_compression(&self) -> u64 {
+        self.eidos_compression_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Maximum physical AIR height. Used by the calibrator to cross-check the benchmark formulas
@@ -175,7 +162,7 @@ impl TraceTotals {
         self.core_rows
             .max(self.byte_pair_lookup_rows)
             .max(self.chiplets_rows)
-            .max(self.blakeg_compression_rows)
+            .max(self.eidos_compression_rows)
             .next_power_of_two()
             .max(MIN_TRACE_LEN)
     }
@@ -227,16 +214,6 @@ impl TraceShape {
     pub fn new(totals: TraceTotals, breakdown: TraceBreakdown) -> Self {
         Self { totals, breakdown }
     }
-
-    /// Logical hasher-work rows used by the solver. When a BlakeG AIR target is present, use it;
-    /// otherwise use the legacy in-chiplets hasher row count.
-    pub fn hasher_work_rows(&self) -> u64 {
-        if self.totals.blakeg_compression_rows > 0 {
-            self.totals.blakeg_compression_rows
-        } else {
-            self.breakdown.hasher_rows
-        }
-    }
 }
 
 impl TraceSnapshot {
@@ -252,15 +229,10 @@ impl TraceSnapshot {
 
         let mut out = Vec::with_capacity(raw.len());
         for (key, entry) in raw {
-            if entry.trace.poseidon2_permutation_rows.is_some()
-                && entry.trace.blakeg_compression_rows.is_none()
-            {
-                return Err(SnapshotError::Poseidon2SourceNotExecutable { scenario: key });
-            }
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
-                blakeg_compression_rows: entry.trace.blakeg_compression_rows.unwrap_or(0),
+                eidos_compression_rows: entry.trace.eidos_compression_rows,
                 byte_pair_lookup_rows: entry.trace.byte_pair_lookup_rows,
             };
             let shape = entry.trace.chiplets_shape;
@@ -272,13 +244,11 @@ impl TraceSnapshot {
                     from_shape: expected,
                 });
             }
-            if trace.blakeg_compression_rows > 0
-                && !trace.blakeg_compression_rows.is_multiple_of(BLAKEG_COMPRESSION_CYCLE_LEN)
-            {
-                return Err(SnapshotError::InvalidBlakeGRows {
+            if !trace.eidos_compression_rows.is_multiple_of(EIDOS_COMPRESSION_CYCLE_LEN) {
+                return Err(SnapshotError::InvalidEidosCompressionRows {
                     scenario: key,
-                    rows: trace.blakeg_compression_rows,
-                    cycle_len: BLAKEG_COMPRESSION_CYCLE_LEN,
+                    rows: trace.eidos_compression_rows,
+                    cycle_len: EIDOS_COMPRESSION_CYCLE_LEN,
                 });
             }
             out.push((
@@ -349,20 +319,16 @@ impl Poseidon2SourceSnapshot {
 /// `trace`.
 #[derive(Deserialize)]
 struct RawScenarioEntry {
-    #[serde(default)]
     provenance: SnapshotProvenance,
     trace: RawTrace,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
-    #[serde(default)]
-    blakeg_compression_rows: Option<u64>,
-    #[serde(default)]
-    poseidon2_permutation_rows: Option<u64>,
-    #[serde(alias = "range_rows")]
+    eidos_compression_rows: u64,
     byte_pair_lookup_rows: u64,
     chiplets_shape: TraceBreakdown,
 }
@@ -400,17 +366,13 @@ pub enum SnapshotError {
         from_shape: u64,
     },
     #[error(
-        "snapshot inconsistency in scenario {scenario:?}: blakeg_compression_rows = {rows} is not a multiple of {cycle_len}"
+        "snapshot inconsistency in scenario {scenario:?}: eidos_compression_rows = {rows} is not a multiple of {cycle_len}"
     )]
-    InvalidBlakeGRows {
+    InvalidEidosCompressionRows {
         scenario: String,
         rows: u64,
         cycle_len: u64,
     },
-    #[error(
-        "scenario {scenario:?} contains Poseidon2 source rows, not an executable Eidos snapshot"
-    )]
-    Poseidon2SourceNotExecutable { scenario: String },
     #[error(
         "snapshot inconsistency in scenario {scenario:?}: poseidon2_permutation_rows = {rows} is not a positive multiple of {cycle_len}"
     )]
@@ -434,7 +396,7 @@ mod tests {
         padded_core: u64,
         padded_and8: u64,
         padded_chiplets: u64,
-        padded_blakeg: u64,
+        padded_eidos_compression: u64,
     }
 
     struct Poseidon2SourceExpectation {
@@ -451,7 +413,7 @@ mod tests {
             padded_core: 131_072,
             padded_and8: 65_536,
             padded_chiplets: 8_192,
-            padded_blakeg: 131_072,
+            padded_eidos_compression: 131_072,
         },
         ProvisionalScenarioExpectation {
             producer_stem: "bench-tx",
@@ -459,7 +421,7 @@ mod tests {
             padded_core: 131_072,
             padded_and8: 65_536,
             padded_chiplets: 8_192,
-            padded_blakeg: 262_144,
+            padded_eidos_compression: 262_144,
         },
         ProvisionalScenarioExpectation {
             producer_stem: "bench-tx",
@@ -467,7 +429,7 @@ mod tests {
             padded_core: 131_072,
             padded_and8: 65_536,
             padded_chiplets: 8_192,
-            padded_blakeg: 131_072,
+            padded_eidos_compression: 131_072,
         },
         ProvisionalScenarioExpectation {
             producer_stem: "bench-tx",
@@ -475,7 +437,7 @@ mod tests {
             padded_core: 65_536,
             padded_and8: 65_536,
             padded_chiplets: 16_384,
-            padded_blakeg: 262_144,
+            padded_eidos_compression: 262_144,
         },
         ProvisionalScenarioExpectation {
             producer_stem: "bench-tx",
@@ -483,7 +445,7 @@ mod tests {
             padded_core: 65_536,
             padded_and8: 65_536,
             padded_chiplets: 16_384,
-            padded_blakeg: 262_144,
+            padded_eidos_compression: 262_144,
         },
         ProvisionalScenarioExpectation {
             producer_stem: "bench-tx",
@@ -491,7 +453,7 @@ mod tests {
             padded_core: 262_144,
             padded_and8: 65_536,
             padded_chiplets: 65_536,
-            padded_blakeg: 1_048_576,
+            padded_eidos_compression: 1_048_576,
         },
     ];
 
@@ -554,10 +516,33 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1000,
             chiplets_rows: breakdown.chiplets_sum(),
-            blakeg_compression_rows: 300,
+            eidos_compression_rows: 300,
             byte_pair_lookup_rows: 100,
         };
         (totals, breakdown)
+    }
+
+    fn assert_eidos_snapshot_parse_error(
+        fixture_name: &str,
+        snapshot: &str,
+        expected_message: &str,
+    ) {
+        let tmp = std::env::temp_dir()
+            .join(format!("synthetic-bench-{fixture_name}-{}.json", std::process::id()));
+        std::fs::write(&tmp, snapshot).unwrap();
+        let err = TraceSnapshot::load_all(&tmp).expect_err("invalid schema must be rejected");
+        let _ = std::fs::remove_file(&tmp);
+
+        match err {
+            SnapshotError::Parse(source) => {
+                let message = source.to_string();
+                assert!(
+                    message.contains(expected_message),
+                    "expected parse error containing {expected_message:?}, got {message:?}"
+                );
+            },
+            other => panic!("expected a schema parse error, got {other}"),
+        }
     }
 
     #[test]
@@ -579,8 +564,8 @@ mod tests {
         assert_eq!(t.padded_and8_lookup(), 128);
         // chiplets alone: 651 → 1024
         assert_eq!(t.padded_chiplets(), 1024);
-        // BlakeG alone: 300 -> 512
-        assert_eq!(t.padded_blakeg_compression(), 512);
+        // Eidos compression alone: 300 -> 512
+        assert_eq!(t.padded_eidos_compression(), 512);
     }
 
     #[test]
@@ -588,7 +573,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1,
             chiplets_rows: 1,
-            blakeg_compression_rows: 0,
+            eidos_compression_rows: 0,
             byte_pair_lookup_rows: 0,
         };
         assert_eq!(totals.padded_total(), MIN_TRACE_LEN);
@@ -658,9 +643,9 @@ mod tests {
                              PROVISIONAL_SCENARIO_EXPECTATIONS",
                         );
                         assert_eq!(
-                            snap.trace.padded_blakeg_compression(),
-                            expected.padded_blakeg,
-                            "{producer_stem}/{key}: padded_blakeg does not match expectation; \
+                            snap.trace.padded_eidos_compression(),
+                            expected.padded_eidos_compression,
+                            "{producer_stem}/{key}: padded_eidos_compression does not match expectation; \
                              replace the provisional snapshot or update \
                              PROVISIONAL_SCENARIO_EXPECTATIONS",
                         );
@@ -724,35 +709,149 @@ mod tests {
     }
 
     #[test]
-    fn poseidon2_source_snapshot_is_not_executable_as_eidos() {
+    fn eidos_loader_rejects_poseidon2_source_schema() {
         let source_path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots/poseidon2-source/bench-tx.json");
         let err = TraceSnapshot::load_all(&source_path)
             .expect_err("Poseidon2 source rows must not be interpreted as Eidos targets");
-        assert!(matches!(err, SnapshotError::Poseidon2SourceNotExecutable { .. }));
+        assert!(matches!(err, SnapshotError::Parse(_)));
     }
 
     #[test]
-    fn missing_optional_fields_default_to_zero() {
-        let minimal = r#"{
-            "consume single P2ID note": {
+    fn executable_eidos_snapshot_requires_complete_schema() {
+        let incomplete = r#"{
+            "missing eidos fields": {
+                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 33,
                     "byte_pair_lookup_rows": 50,
-                    "chiplets_shape": { "hasher_rows": 32, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": {
+                        "hasher_rows": 32,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0
+                    }
                 }
             }
         }"#;
-        let tmp = std::env::temp_dir().join("synthetic-bench-defaults.json");
-        std::fs::write(&tmp, minimal).unwrap();
-        let scenarios = TraceSnapshot::load_all(&tmp).expect("load defaults snapshot");
+        let tmp = std::env::temp_dir().join("synthetic-bench-incomplete-schema.json");
+        std::fs::write(&tmp, incomplete).unwrap();
+        let err = TraceSnapshot::load_all(&tmp).expect_err("incomplete schema must be rejected");
         let _ = std::fs::remove_file(&tmp);
-        let (_, snap) = &scenarios[0];
-        assert_eq!(snap.shape.kernel_rom_rows, 0);
-        assert_eq!(snap.shape.ace_rows, 0);
-        assert_eq!(snap.trace.blakeg_compression_rows, 0);
-        assert_eq!(snap.provenance, SnapshotProvenance::ProducerMeasured);
+        assert!(matches!(err, SnapshotError::Parse(_)));
+    }
+
+    #[test]
+    fn executable_eidos_snapshot_requires_provenance() {
+        let missing_provenance = r#"{
+            "missing provenance": {
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 33,
+                    "eidos_compression_rows": 64,
+                    "byte_pair_lookup_rows": 65536,
+                    "chiplets_shape": {
+                        "hasher_rows": 32,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0
+                    }
+                }
+            }
+        }"#;
+
+        assert_eidos_snapshot_parse_error("missing-provenance", missing_provenance, "provenance");
+    }
+
+    #[test]
+    fn executable_eidos_snapshot_requires_complete_chiplets_shape() {
+        let missing_kernel_rom_rows = r#"{
+            "missing kernel ROM rows": {
+                "provenance": "producer_measured",
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 33,
+                    "eidos_compression_rows": 64,
+                    "byte_pair_lookup_rows": 65536,
+                    "chiplets_shape": {
+                        "hasher_rows": 32,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "ace_rows": 0
+                    }
+                }
+            }
+        }"#;
+
+        assert_eidos_snapshot_parse_error(
+            "missing-kernel-rom-rows",
+            missing_kernel_rom_rows,
+            "kernel_rom_rows",
+        );
+    }
+
+    #[test]
+    fn executable_eidos_snapshot_rejects_unknown_chiplets_shape_fields() {
+        let unknown_shape_field = r#"{
+            "unknown chiplet shape field": {
+                "provenance": "producer_measured",
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 33,
+                    "eidos_compression_rows": 64,
+                    "byte_pair_lookup_rows": 65536,
+                    "chiplets_shape": {
+                        "hasher_rows": 32,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0,
+                        "unexpected_rows": 0
+                    }
+                }
+            }
+        }"#;
+
+        assert_eidos_snapshot_parse_error(
+            "unknown-chiplets-shape-field",
+            unknown_shape_field,
+            "unexpected_rows",
+        );
+    }
+
+    #[test]
+    fn executable_eidos_snapshot_rejects_non_eidos_trace_fields() {
+        for field in ["blakeg_compression_rows", "range_rows"] {
+            let snapshot = format!(
+                r#"{{
+                    "invalid field": {{
+                        "provenance": "producer_measured",
+                        "trace": {{
+                            "core_rows": 100,
+                            "chiplets_rows": 33,
+                            "eidos_compression_rows": 64,
+                            "byte_pair_lookup_rows": 65536,
+                            "{field}": 64,
+                            "chiplets_shape": {{
+                                "hasher_rows": 32,
+                                "bitwise_rows": 0,
+                                "memory_rows": 0,
+                                "kernel_rom_rows": 0,
+                                "ace_rows": 0
+                            }}
+                        }}
+                    }}
+                }}"#,
+            );
+            let tmp = std::env::temp_dir().join(format!("synthetic-bench-{field}.json"));
+            std::fs::write(&tmp, snapshot).unwrap();
+            let err = TraceSnapshot::load_all(&tmp).expect_err("unknown field must be rejected");
+            let _ = std::fs::remove_file(&tmp);
+            assert!(matches!(err, SnapshotError::Parse(_)), "unexpected error for {field}: {err}");
+        }
     }
 
     #[test]
@@ -763,9 +862,15 @@ mod tests {
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 33,
-                    "blakeg_compression_rows": 64,
+                    "eidos_compression_rows": 64,
                     "byte_pair_lookup_rows": 65536,
-                    "chiplets_shape": { "hasher_rows": 32, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": {
+                        "hasher_rows": 32,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0
+                    }
                 }
             }
         }"#;
@@ -782,11 +887,19 @@ mod tests {
         // chiplets_rows says 500 but the breakdown sums to 11 (10 + 0 + 0 + 0 + 0 + 1).
         let mismatched = r#"{
             "broken": {
+                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 500,
+                    "eidos_compression_rows": 64,
                     "byte_pair_lookup_rows": 0,
-                    "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": {
+                        "hasher_rows": 10,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0
+                    }
                 }
             }
         }"#;
@@ -798,23 +911,31 @@ mod tests {
     }
 
     #[test]
-    fn rejects_misaligned_blakeg_rows() {
+    fn rejects_misaligned_eidos_compression_rows() {
         let misaligned = r#"{
             "broken": {
+                "provenance": "producer_measured",
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 11,
-                    "blakeg_compression_rows": 17,
+                    "eidos_compression_rows": 17,
                     "byte_pair_lookup_rows": 0,
-                    "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": {
+                        "hasher_rows": 10,
+                        "bitwise_rows": 0,
+                        "memory_rows": 0,
+                        "kernel_rom_rows": 0,
+                        "ace_rows": 0
+                    }
                 }
             }
         }"#;
-        let tmp = std::env::temp_dir().join("synthetic-bench-blakeg-misaligned.json");
+        let tmp = std::env::temp_dir().join("synthetic-bench-eidos_compression-misaligned.json");
         std::fs::write(&tmp, misaligned).unwrap();
-        let err = TraceSnapshot::load_all(&tmp).expect_err("expected BlakeG row rejection");
+        let err =
+            TraceSnapshot::load_all(&tmp).expect_err("expected EidosCompression row rejection");
         let _ = std::fs::remove_file(&tmp);
-        assert!(matches!(err, SnapshotError::InvalidBlakeGRows { rows: 17, .. }));
+        assert!(matches!(err, SnapshotError::InvalidEidosCompressionRows { rows: 17, .. }));
     }
 
     #[test]
@@ -823,13 +944,14 @@ mod tests {
         // tolerate.
         let realistic = r#"{
             "consume single P2ID note": {
+                "provenance": "producer_measured",
                 "prologue": 3501,
                 "notes_processing": 1761,
                 "epilogue": { "total": 72351 },
                 "trace": {
                     "core_rows": 77699,
                     "chiplets_rows": 6538,
-                    "blakeg_compression_rows": 120352,
+                    "eidos_compression_rows": 120352,
                     "byte_pair_lookup_rows": 65536,
                     "chiplets_shape": {
                         "hasher_rows": 3761,
@@ -850,6 +972,6 @@ mod tests {
         assert_eq!(key, "consume single P2ID note");
         assert_eq!(snap.trace.core_rows, 77_699);
         assert_eq!(snap.shape.hasher_rows, 3_761);
-        assert_eq!(snap.trace.blakeg_compression_rows, 120_352);
+        assert_eq!(snap.trace.eidos_compression_rows, 120_352);
     }
 }

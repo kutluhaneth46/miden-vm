@@ -51,7 +51,7 @@ Trace generation produces the four matrices in the Miden proof statement:
 
 * the core trace for the system, decoder, and operand stack;
 * the stacked chiplets trace for the hash controller, bitwise, memory, ACE, and kernel ROM;
-* the standalone 32-row BlakeG compression trace; and
+* the standalone 32-row Eidos compression trace; and
 * the fixed And8 lookup trace, whose multiplicities also serve 16-bit range checks.
 
 Typed LogUp relations connect requests and responses across these matrices. The processor collects

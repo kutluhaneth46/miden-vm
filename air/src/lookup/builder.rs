@@ -319,8 +319,8 @@ pub trait LookupGroup {
 
     /// Open an ungated batch of two pre-encoded linear denominators.
     ///
-    /// This is the selected-slot pattern used by the BlakeG AIR: row selection lives in the two
-    /// multiplicities, and the batch contributes `(m0 * D1 + m1 * D0) / (D0 * D1)`.
+    /// This is the selected-slot pattern used by the Eidos compression AIR: row selection lives in
+    /// the two multiplicities, and the batch contributes `(m0 * D1 + m1 * D0) / (D0 * D1)`.
     fn selected_batch2_encoded(
         &mut self,
         name: &'static str,

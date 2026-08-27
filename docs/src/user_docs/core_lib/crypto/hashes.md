@@ -45,14 +45,14 @@ Module `miden::core::crypto::hashes::sha256` contains procedures for computing h
 
 Module `miden::core::crypto::hashes::eidos` contains the VM-native Eidos hashing helpers. Eidos
 frames an input length and optional domain in an initial chaining word, then absorbs 8-field-element
-blocks with BlakeG compression. A digest is one word (4 field elements).
+blocks with Eidos compression. A digest is one word (4 field elements).
 
 | Procedure | Description |
 | --------- | ----------- |
 | `init_chaining_word` | Constructs `Eidos::init_chaining_word(0, n)`.<br /><br />Input: `[n, ...]`<br />Output: `[CV, ...]` |
 | `init_chaining_word_in_domain` | Constructs `Eidos::init_chaining_word(domain, n)`.<br /><br />Input: `[n, domain, ...]`<br />Output: `[CV, ...]` |
-| `compress` | Performs one BlakeG compression.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[BLOCK_LO, BLOCK_HI, DIGEST, ...]` |
-| `digest` | Drops the two block words from a post-compression state.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, DIGEST, ...]`<br />Output: `[DIGEST, ...]` |
+| `compress` | Performs one Eidos compression and updates the chaining word.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[BLOCK_LO, BLOCK_HI, CV', ...]` |
+| `digest` | Drops the two block words and returns the current chaining word. The returned word is a final digest only after the framed Eidos schedule is complete.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[CV, ...]` |
 | `hash_words_with_domain` | Hashes the word-aligned memory range `[start_addr, end_addr)` with a domain identifier. The input length is bound into the initial chaining word.<br /><br />Input: `[domain, start_addr, end_addr, ...]`<br />Output: `[H, ...]` |
 | `hash_words` | Equivalent to `hash_words_with_domain` with `domain = 0`.<br /><br />Input: `[start_addr, end_addr, ...]`<br />Output: `[H, ...]` |
 | `hash_elements_with_domain` | Hashes `num_elements` field elements from word-aligned memory and binds both their exact count and `domain`.<br /><br />Input: `[ptr, num_elements, domain, ...]`<br />Output: `[HASH, ...]` |

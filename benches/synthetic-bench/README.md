@@ -31,11 +31,10 @@ Criterion groups against it. The result is a VM-level regression detector
 that isolates *prover* changes from *workload* changes without depending
 on the producer's machinery.
 
-The checked-in `bench-tx.json` has not yet completed that producer loop. Its cycle fields and
-core/bitwise/memory/kernel data come unchanged from the Poseidon2-era capture. The conversion
-reinterpreted the former native-hasher row count as BlakeG rows, divided it by 32 for an estimated
-controller-row breakdown, and assigned the fixed 65,536-row And8 table. Those assumptions preserve
-useful provisional scale targets, but they are not evidence of the current producer's trace shape.
+The checked-in `bench-tx.json` is a provisional calibration target, not a producer measurement. Its
+Eidos compression and controller-row values are estimates, and its And8 target is the fixed
+65,536-row table. These values preserve useful proving-cost brackets, but they are not evidence of
+a producer trace shape.
 
 ## Pipeline (per bench run)
 
@@ -45,9 +44,9 @@ stale calibration constants checked into the repo.
 
 1. **Calibrate (once)** -- run each MASM snippet as `repeat.K ...` and
    divide the resulting per-component row counts by `K` to learn how
-   many core/hasher/memory/... rows a single iteration costs *on this
-   VM*. Running this on every bench invocation is what keeps the
-   bench honest across VM changes: if `bcompress` gets cheaper tomorrow,
+   many core, Eidos-compression, chiplet, and memory rows a single iteration costs *on this VM*.
+   Running this on every bench invocation is what keeps the
+   bench honest across VM changes: if `compress` gets cheaper tomorrow,
    tomorrow's iteration count grows to compensate, and the target
    bracket is still hit.
 
@@ -69,12 +68,8 @@ single file in `SYNTH_SNAPSHOT`):
    concatenate, and enclose in `begin ... end`. The output is the MASM
    program that Criterion actually runs.
 5. **Verify** -- execute the emitted program, measure its real row
-   counts, and assert that the available padded brackets match the
-   scenario's. The current four-AIR topology measures core, chiplets,
-   BlakeG compression, and the fixed And8 byte-pair lookup table. For
-   legacy snapshots without a separate native-hash target, the loader
-   leaves the BlakeG target unset and treats `chiplets_shape.hasher_rows`
-   as an in-chiplets hasher target.
+   counts, and assert that all four padded brackets match the scenario's:
+   core, chiplets, Eidos compression, and the fixed And8 byte-pair lookup table.
    A bracket miss fails the bench; smaller drift inside the same bracket
    is reported but tolerated, because proving cost is driven by the
    padded length, not the raw count.
@@ -85,14 +80,14 @@ Four patterns cover every dynamic component the solver targets:
 
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
-| `hasher`      | `bcompress`                                  | BlakeG compression work      |
+| `eidos_compression` | `compress`                            | Eidos compression work        |
 | `bitwise`     | `u32split u32xor`                            | total chiplets bracket        |
 | `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | advisory memory composition |
 | `decoder_pad` | `swap dup.1 add`                             | core (decoder + stack)        |
 
 `memory` advances its word-aligned address by 262148 so each iteration
 touches a distinct address. The fixed And8 lookup table is not workload
-shaped; only its multiplicity column varies with BlakeG activity.
+shaped; only its multiplicity column varies with Eidos compression activity.
 
 The solver has no snippets targeting the ACE or kernel-ROM chiplets.
 
@@ -109,23 +104,20 @@ snippet acts as the efficient adjustable filler for the authoritative
 total-chiplets target. The memory snippet keeps the advisory memory mix
 representative; bitwise, ACE, and kernel-ROM composition is reported for
 visibility but is not a hard constraint. This preserves the total
-chiplets proving bracket while the separate BlakeG target preserves
+chiplets proving bracket while the separate Eidos compression target preserves
 native-hash work.
 
 ## Snapshot format
 
 A producer JSON file is a map of scenario keys to entries. Each entry
-must carry a `trace` section and may carry a `provenance` sibling; other sibling fields (cycle
-counts, metadata, ...) are silently ignored. `provenance` is either `producer_measured` or
-`derived_pending_producer_port`. It defaults to `producer_measured` for compatibility with existing
-producer output, while any derived snapshot must set the provisional value explicitly. Inside
-`trace`, the AIR-side
-totals (`core_rows`, `chiplets_rows`, `blakeg_compression_rows`,
+must carry a `provenance` value and a `trace` section; other sibling fields (cycle counts,
+metadata, ...) are silently ignored. `provenance` is either `producer_measured` or
+`derived_pending_producer_port`. Inside `trace`, the AIR-side
+totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`,
 `byte_pair_lookup_rows`) are the verifier's contract; nested
-`chiplets_shape` is an advisory per-chiplet breakdown. For older
-snapshots, missing `blakeg_compression_rows` defaults to zero, and the
-former `range_rows` key is accepted as a bracket-only alias for
-`byte_pair_lookup_rows`. The loader checks
+`chiplets_shape` is an advisory per-chiplet breakdown containing `hasher_rows`, `bitwise_rows`,
+`memory_rows`, `kernel_rom_rows`, and `ace_rows`. These fields are all required; unknown fields are
+rejected so a topology or schema mismatch fails at load time. The loader checks
 `trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
 
 ```json
@@ -135,7 +127,7 @@ former `range_rows` key is accepted as a bracket-only alias for
     "trace": {
       "core_rows": 77683,
       "chiplets_rows": 6537,
-      "blakeg_compression_rows": 120384,
+      "eidos_compression_rows": 120384,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 3762,
@@ -180,23 +172,18 @@ count. The assertions that can fail the bench are on the four independently padd
 
 - `padded_core     = max(64, next_pow2(core_rows))`.
 - `padded_chiplets = max(64, next_pow2(chiplets_rows))`.
-- `padded_blakeg   = max(64, next_pow2(blakeg_compression_rows))`.
+- `padded_eidos_compression   = max(64, next_pow2(eidos_compression_rows))`.
 - `padded_and8     = max(64, next_pow2(byte_pair_lookup_rows))`.
-- `padded_total    = max(padded_core, padded_chiplets, padded_blakeg, padded_and8)`.
+- `padded_total    = max(padded_core, padded_chiplets, padded_eidos_compression, padded_and8)`.
 
 These can land in *different* brackets on the same workload -- `consume two P2ID notes`, for
-example, has `padded_core = 131072`, `padded_chiplets = 8192`, `padded_blakeg = 262144`, and
+example, has `padded_core = 131072`, `padded_chiplets = 8192`, `padded_eidos_compression = 262144`, and
 `padded_and8 = 65536`. Checking them independently catches a bracket miss that a single global
 `padded_total` check would hide.
 
-Legacy snapshots do not carry `blakeg_compression_rows`. Their
-`chiplets_shape.hasher_rows` value remains an in-chiplets native-hash target. The verifier uses the
-legacy global bracket contract but cannot infer or enforce a separate BlakeG bracket; production
-Eidos snapshots must therefore provide `blakeg_compression_rows` explicitly.
-
 ### Soft checks -- report, don't fail
 
-`core_rows`, `chiplets_rows`, `blakeg_compression_rows`, and
+`core_rows`, `chiplets_rows`, `eidos_compression_rows`, and
 `byte_pair_lookup_rows` are
 compared against the targets within a 2% band. A drift inside that band
 usually leaves the proving bracket unchanged, so the bench only reports
@@ -210,19 +197,17 @@ printed for visibility but never asserted. Some divergence is
 unavoidable: MAST hashing at program init contributes hasher rows
 that the synthetic program can't suppress, so a snapshot with
 `core_rows / hasher_rows > 4` cannot be per-chiplet-matched even
-though it still matches both padded brackets. See `src/snippets.rs`
+though it still matches all padded AIR brackets. See `src/snippets.rs`
 for the cases where this structural mismatch shows up.
 
 ## Replacing provisional snapshots from a producer
 
-Snapshots travel by hand so that producer and consumer can evolve independently. The current
-`protocol/bin/bench-transaction/` checkout is not yet Eidos-capable; port it to emit the four AIR
-totals before replacing the checked-in provisional data. Once the producer measures the current
-VM:
+Snapshots travel by hand so that producer and consumer can evolve independently. Replace the
+checked-in provisional data only with producer output that reports the four Eidos AIR totals:
 
 1. In `protocol`: `cargo run --release --bin bench-transaction --features concurrent`.
 2. Confirm every scenario contains current `core_rows`, `chiplets_rows`,
-   `blakeg_compression_rows`, and `byte_pair_lookup_rows` values, and mark its provenance
+   `eidos_compression_rows`, and `byte_pair_lookup_rows` values, and mark its provenance
    `producer_measured`.
 3. Copy the Eidos producer output over
    `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`. Do not derive it from
@@ -264,7 +249,7 @@ Env vars:
 The `prove` and `verify` axes use `HashFunction::Poseidon2` for the
 optional STARK proof-hash backend (see `BENCH_HASH` in
 `benches/synthetic_bench.rs`). This is independent of the VM-native
-Eidos/BlakeG hash measured by the trace-shaping workload.
+Eidos hash measured by the trace-shaping workload.
 
 ## Recursive-verification benchmarks
 

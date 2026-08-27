@@ -894,12 +894,12 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_hasher_bcompress(
+    fn record_hasher_compress(
         &mut self,
         input_state: [Felt; STATE_WIDTH],
         output_state: [Felt; STATE_WIDTH],
     ) {
-        self.hasher_for_chiplet.record_bcompress_input(input_state);
+        self.hasher_for_chiplet.record_compress_input(input_state);
         self.hasher_chiplet_shim.record_compression_output(output_state);
     }
 
@@ -1264,7 +1264,7 @@ impl HasherChipletShim {
 
         block_addr
     }
-    /// Records the output of one BlakeG compression request.
+    /// Records the output of one Eidos compression request.
     pub fn record_compression_output(&mut self, hashed_state: [Felt; 12]) {
         self.hasher_replay.record_compression(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_OP;

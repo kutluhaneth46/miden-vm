@@ -50,8 +50,8 @@ Miden VM uses multiple communication buses:
 - The domain-separated `RangeCheck` [bus](../range.md#communication-bus), which matches requests
   from [u32 operations](../stack/u32_ops.md), Merkle depth and canonical-index checks from
   [Merkle operations](../stack/crypto_ops.md#merkle-range-checks), the
-  [memory chiplet](../chiplets/memory.md), and the BlakeG AIR against the fixed 16-bit table in
-  [`And8LookupAir`](../range.md#fixed-byte-pair-table). It is implemented using LogUp and packed
+  [memory chiplet](../chiplets/memory.md), and the Eidos compression AIR against the fixed 16-bit
+  table in [`And8LookupAir`](../range.md#fixed-byte-pair-table). It is implemented using LogUp and packed
   into shared lookup columns rather than a dedicated $b_{range}$ column.
 
 

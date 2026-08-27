@@ -10,7 +10,7 @@ use miden_air::{
         chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
     },
 };
-use miden_core::{chiplets::blakeg, field::Field};
+use miden_core::{chiplets::eidos_compression, field::Field};
 
 use crate::{Felt, ONE, ZERO, operation::OperationError, trace::ChipletTraceFragment};
 
@@ -291,7 +291,7 @@ fn fill_aead_stream_chunk(
     debug_assert_eq!(chunk.len(), row_width * AEAD_STREAM_CYCLE_LEN);
 
     let plaintext = op.plaintext;
-    let limbs = plaintext.map(blakeg::unpack);
+    let limbs = plaintext.map(eidos_compression::unpack);
     let limb_data: [(u32, Felt, Felt); 8] = core::array::from_fn(|idx| {
         let (lo, hi) = limbs[idx / 2];
         let plaintext_limb = if idx % 2 == 0 { lo } else { hi };

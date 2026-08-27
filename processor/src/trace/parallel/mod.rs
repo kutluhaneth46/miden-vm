@@ -196,10 +196,10 @@ fn build_trace_inner(
         max_trace_len,
     )?;
 
-    let blakeg_compression_trace_len = chiplets.blakeg_compression_trace_len();
-    let blakeg_compression_height = pad_to_trace_length(blakeg_compression_trace_len);
+    let eidos_compression_trace_len = chiplets.eidos_compression_trace_len();
+    let eidos_compression_height = pad_to_trace_length(eidos_compression_trace_len);
     let range_checker =
-        initialize_range_checker(range_checker_replay, &chiplets, blakeg_compression_height);
+        initialize_range_checker(range_checker_replay, &chiplets, eidos_compression_height);
 
     let mut core_trace_data = generate_core_trace_row_major(
         core_trace_contexts,
@@ -222,13 +222,13 @@ fn build_trace_inner(
         [
             MidenAir::Core,
             MidenAir::Chiplets,
-            MidenAir::BlakeGCompression,
+            MidenAir::EidosCompression,
             MidenAir::And8Lookup,
         ],
         "heights below must be listed in AIRS order",
     );
     let heights: [usize; MIDEN_AIR_COUNT] =
-        [core_height, chiplets_height, blakeg_compression_height, byte_pair_lookup_rows];
+        [core_height, chiplets_height, eidos_compression_height, byte_pair_lookup_rows];
     validate_heights_within_max_trace_len(&heights)?;
     let estimated_bytes = memory::prover_peak_bytes(&heights, &pcs_params).ok_or(
         ExecutionError::ProverMemoryExceeded {
@@ -246,14 +246,14 @@ fn build_trace_inner(
     let trace_len_summary = TraceLenSummary::new_with_padded(
         core_trace_len,
         ChipletsLengths::new(&chiplets),
-        blakeg_compression_trace_len,
+        eidos_compression_trace_len,
         byte_pair_lookup_rows,
         heights,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, blakeg_compression_trace, mut and8_counts), ()) = rayon::join(
-        || chiplets.into_traces(chiplets_height, blakeg_compression_height),
+    let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = rayon::join(
+        || chiplets.into_traces(chiplets_height, eidos_compression_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
 
@@ -267,7 +267,7 @@ fn build_trace_inner(
         MainTrace::from_parts(
             core_trace_data,
             chiplets_trace.trace,
-            blakeg_compression_trace.trace,
+            eidos_compression_trace.trace,
             and8_lookup_trace,
             last_program_row,
         )
@@ -521,7 +521,7 @@ fn push_halt_opcode_row(
 fn initialize_range_checker(
     range_checker_replay: RangeCheckerReplay,
     chiplets: &Chiplets,
-    blakeg_compression_height: usize,
+    eidos_compression_height: usize,
 ) -> RangeChecker {
     let mut range_checker = RangeChecker::new();
 
@@ -533,7 +533,7 @@ fn initialize_range_checker(
     // Add all hasher- and memory-related range checks.
     chiplets.append_range_checks(&mut range_checker);
 
-    chiplets.append_blakeg_range_checks(blakeg_compression_height, &mut range_checker);
+    chiplets.append_eidos_compression_range_checks(eidos_compression_height, &mut range_checker);
 
     range_checker
 }
@@ -566,7 +566,7 @@ fn initialize_chiplets(
 
     if prebuilt_hasher.as_ref().is_some_and(|hasher| {
         hasher.trace_len() > max_hasher_trace_len
-            || hasher.blakeg_compression_trace_len() > max_trace_len
+            || hasher.eidos_compression_trace_len() > max_trace_len
     }) {
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
@@ -617,7 +617,7 @@ fn initialize_chiplets(
         "chiplet preflight length differs from the materialized trace",
     );
     if chiplets.trace_len() > max_trace_len
-        || chiplets.blakeg_compression_trace_len() > max_trace_len
+        || chiplets.eidos_compression_trace_len() > max_trace_len
     {
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
@@ -654,13 +654,13 @@ fn non_hasher_trace_len(
 pub(crate) fn build_hasher_chiplet<'a>(
     ops: impl IntoIterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>>,
     max_controller_trace_len: usize,
-    max_blakeg_trace_len: usize,
+    max_eidos_compression_trace_len: usize,
 ) -> Result<Hasher, ExecutionError> {
     let mut hasher = Hasher::default();
     for hasher_op in ops {
         match hasher_op? {
-            ResolvedHasherOp::BCompress(input_state) => {
-                let _ = hasher.bcompress(input_state);
+            ResolvedHasherOp::Compress(input_state) => {
+                let _ = hasher.compress(input_state);
             },
             ResolvedHasherOp::AeadXof(ctx, clk, input_state) => {
                 let _ = hasher.compress_aead_xof(ctx, clk, input_state);
@@ -684,9 +684,9 @@ pub(crate) fn build_hasher_chiplet<'a>(
             },
         }
         if hasher.trace_len() > max_controller_trace_len
-            || hasher.blakeg_compression_trace_len() > max_blakeg_trace_len
+            || hasher.eidos_compression_trace_len() > max_eidos_compression_trace_len
         {
-            return Err(ExecutionError::TraceLenExceeded(max_blakeg_trace_len));
+            return Err(ExecutionError::TraceLenExceeded(max_eidos_compression_trace_len));
         }
     }
     Ok(hasher)

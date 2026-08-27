@@ -1,21 +1,23 @@
-use miden_core::{ZERO, chiplets::blakeg, events::SystemEvent, operations::Operation::*};
+use miden_core::{
+    ZERO, chiplets::eidos_compression, events::SystemEvent, operations::Operation::*,
+};
 
 use super::BasicBlockBuilder;
 
 // HASHING
 // ================================================================================================
 
-/// Appends BlakeG compression and stack manipulation operations to compute a 1-to-1 hash.
+/// Appends Eidos compression and stack manipulation operations to compute a 1-to-1 hash.
 ///
 /// - Input:   the top 4 elements are the word `A` to be hashed.
 /// - Output:  the top 4 elements are the digest word.
 ///
 /// Internally, this compresses `[A, ZERO]` under the Eidos felt-mode CV for 4 input elements.
 pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
-    let cv = blakeg::init_chaining_word(0, 4);
+    let cv = eidos_compression::init_chaining_word(0, 4);
     #[rustfmt::skip]
     let ops = [
-        // Add a zero word to serve as RATE1.
+        // Add the zero high block word.
         // => [0, A, ...]
         Pad, Pad, Pad, Pad,
 
@@ -23,13 +25,13 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
         // => [CV, 0, A, ...]
         Push(cv[3]), Push(cv[2]), Push(cv[1]), Push(cv[0]),
 
-        // Reorder to the bcompress state [A, 0, CV].
+        // Reorder to the compress state [A, 0, CV].
         // => [A, 0, CV, ...]
         SwapW2,
 
         // Compress and extract the digest.
         // => [A, 0, DIGEST, ...]
-        BCompress,
+        Compress,
 
         // => [0, DIGEST, ...]
         Drop, Drop, Drop, Drop,
@@ -39,19 +41,19 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_ops(ops);
 }
 
-/// Appends BlakeG compression and stack manipulation operations to compute a 2-to-1 hash.
+/// Appends Eidos compression and stack manipulation operations to compute a 2-to-1 hash.
 ///
 /// - Input:   the top 8 elements form the 2-word preimage `[A, B]` in stack order (A on top).
 /// - Output:  the top 4 elements are the digest word, which is `hash(A, B)`.
 pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
-    let cv = blakeg::two_to_one_chaining_word(0);
+    let cv = eidos_compression::two_to_one_chaining_word(0);
     #[rustfmt::skip]
     let ops = [
         // Add the initial chaining value.
         // => [CV, A, B, ...]
         Push(cv[3]), Push(cv[2]), Push(cv[1]), Push(cv[0]),
 
-        // Reorder to the bcompress state [A, B, CV].
+        // Reorder to the compress state [A, B, CV].
         // => [B, A, CV, ...]
         SwapW2,
         // => [A, B, CV, ...]
@@ -59,7 +61,7 @@ pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
 
         // Compress and extract the digest.
         // => [A, B, DIGEST, ...]
-        BCompress,
+        Compress,
 
         // => [B, DIGEST, ...]
         Drop, Drop, Drop, Drop,

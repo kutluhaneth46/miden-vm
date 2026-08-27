@@ -49,7 +49,7 @@ const AND8_PREPROCESSED_TRACE_COM_3 = 5780773595731865481
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
-#!   [log_core, log_chiplets, log_blakeg_compression]
+#!   [log_core, log_chiplets, log_eidos_compression]
 #!
 #! The And8 lookup height is fixed verifier setup.
 #!
@@ -66,7 +66,7 @@ pub proc load_air_context
 
     adv_push
     exec.assert_shape_log
-    exec.layout::set_blakeg_compression_trace_length_log
+    exec.layout::set_eidos_compression_trace_length_log
 
     push.AND8_LOOKUP_LOG_HEIGHT
     exec.layout::set_and8_lookup_trace_length_log
@@ -74,7 +74,7 @@ pub proc load_air_context
     exec.layout::get_core_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.layout::get_blakeg_compression_trace_length_log
+    exec.layout::get_eidos_compression_trace_length_log
     u32max
     exec.layout::get_and8_lookup_trace_length_log
     u32max

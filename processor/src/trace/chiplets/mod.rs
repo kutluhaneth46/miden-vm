@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{
     CHIPLETS_WIDTH,
-    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH,
         ace::ACE_CHIPLET_NUM_COLS,
@@ -10,6 +9,7 @@ use miden_air::trace::{
         hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
+    eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
 use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::KernelDescriptor};
 
@@ -25,7 +25,9 @@ pub(crate) use bitwise::{AEAD_STREAM_CYCLE_LEN, Bitwise};
 
 mod hasher;
 pub(crate) use hasher::Hasher;
-pub use hasher::{build_external_blakeg_traces, build_ordered_external_blakeg_traces};
+pub use hasher::{
+    build_external_eidos_compression_traces, build_ordered_external_eidos_compression_traces,
+};
 
 pub(crate) fn build_and8_lookup_trace(and8_counts: &[u64]) -> Vec<Felt> {
     hasher::build_and8_lookup_trace(and8_counts)
@@ -51,7 +53,7 @@ pub struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-pub struct BlakeGCompressionTrace {
+pub struct EidosCompressionTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
@@ -151,9 +153,9 @@ impl Chiplets {
             + 1
     }
 
-    /// Returns the unpadded trace length of the standalone BlakeG compression AIR.
-    pub fn blakeg_compression_trace_len(&self) -> usize {
-        self.hasher.blakeg_compression_trace_len()
+    /// Returns the unpadded trace length of the standalone Eidos compression AIR.
+    pub fn eidos_compression_trace_len(&self) -> usize {
+        self.hasher.eidos_compression_trace_len()
     }
 
     /// Returns the index of the first row of `Bitwise` execution trace.
@@ -190,34 +192,36 @@ impl Chiplets {
         self.memory.append_range_checks(range_checker);
     }
 
-    /// Adds range checks emitted by the standalone BlakeG compression AIR.
-    pub fn append_blakeg_range_checks(
+    /// Adds range checks emitted by the standalone Eidos compression AIR.
+    pub fn append_eidos_compression_range_checks(
         &self,
-        blakeg_height: usize,
+        eidos_compression_height: usize,
         range_checker: &mut RangeChecker,
     ) {
-        self.hasher.append_blakeg_range_checks(blakeg_height, range_checker);
+        self.hasher
+            .append_eidos_compression_range_checks(eidos_compression_height, range_checker);
     }
 
-    /// Returns execution traces for `ChipletsAir` and `BlakeGCompressionAir`.
+    /// Returns execution traces for `ChipletsAir` and `EidosCompressionAir`.
     pub fn into_traces(
         self,
         trace_len: usize,
-        blakeg_trace_len: usize,
-    ) -> (ChipletsTrace, BlakeGCompressionTrace, Vec<u64>) {
+        eidos_compression_trace_len: usize,
+    ) -> (ChipletsTrace, EidosCompressionTrace, Vec<u64>) {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
         assert!(
-            self.blakeg_compression_trace_len() <= blakeg_trace_len,
-            "target BlakeG trace length too small"
+            self.eidos_compression_trace_len() <= eidos_compression_trace_len,
+            "target Eidos compression trace length too small"
         );
 
         let mut trace = Felt::zero_vec(CHIPLETS_WIDTH * trace_len);
-        let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * blakeg_trace_len);
-        let and8_counts = self.fill_trace(&mut trace, trace_len, &mut blakeg_trace);
+        let mut eidos_compression_trace =
+            Felt::zero_vec(NUM_EIDOS_COMPRESSION_COLS * eidos_compression_trace_len);
+        let and8_counts = self.fill_trace(&mut trace, trace_len, &mut eidos_compression_trace);
 
         (
             ChipletsTrace { trace },
-            BlakeGCompressionTrace { trace: blakeg_trace },
+            EidosCompressionTrace { trace: eidos_compression_trace },
             and8_counts,
         )
     }
@@ -233,7 +237,7 @@ impl Chiplets {
         self,
         trace: &mut [Felt],
         trace_len: usize,
-        blakeg_trace: &mut [Felt],
+        eidos_compression_trace: &mut [Felt],
     ) -> Vec<u64> {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
@@ -306,7 +310,7 @@ impl Chiplets {
         rayon::scope(|s| {
             let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
-                *and8_counts = hasher.fill_trace(&mut hasher_fragment, blakeg_trace);
+                *and8_counts = hasher.fill_trace(&mut hasher_fragment, eidos_compression_trace);
             });
             let bitwise_and8_counts = &mut bitwise_and8_counts;
             s.spawn(move |_| {

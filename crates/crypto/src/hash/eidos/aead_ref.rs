@@ -3,15 +3,11 @@
 //! This module is for tests and vector generation. It does not manage nonces. Production callers
 //! must never reuse `(key, nonce)` and must not repeat counter blocks under a fixed CTR key. The
 //! low-level decryption helper does not authenticate; callers that need plaintext must use
-//! [`decrypt_felts_expanded_authenticated`].
+//! [`decrypt_felts_expanded_authenticated`](crate::hash::eidos::aead_ref::decrypt_felts_expanded_authenticated).
 
 use alloc::vec::Vec;
 
-use super::{
-    Eidos,
-    framing::{compress_felt_block, encode_felt_block, unpack_to_cv, unpack_u32_pair},
-    primitive::BlakeG,
-};
+use super::{Eidos, compression, encoding};
 use crate::{
     Felt, Word,
     field::{BasedVectorSpace, BinomialExtensionField},
@@ -32,15 +28,12 @@ type QuadFelt = BinomialExtensionField<Felt, 2>;
 /// Eidos.
 ///
 /// The returned word is a masked Eidos digest with 252 bits of entropy, usable
-/// as an input CV to [`BlakeG::compress_raw`] for keystream generation.
+/// as an input CV to the internal raw compression function for keystream generation.
 pub fn derive_ctr_key(key: Word, nonce: Word) -> Word {
     // Fixed-arity derivations use the domain tag for separation; variable-length
     // Eidos hashes bind length in the initial chaining value.
     let init = Eidos::init_chaining_word(AEAD_CTR_DOMAIN, 0);
-    compress_felt_block(
-        init,
-        [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]],
-    )
+    Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
 }
 
 /// Domain-separates `(key, nonce)` and compresses to a MAC key via Eidos.
@@ -51,19 +44,16 @@ pub fn derive_mac_key(key: Word, nonce: Word) -> Word {
     // Fixed-arity derivations use the domain tag for separation; variable-length
     // Eidos hashes bind length in the initial chaining value.
     let init = Eidos::init_chaining_word(AEAD_MAC_DOMAIN, 0);
-    compress_felt_block(
-        init,
-        [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]],
-    )
+    Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
 }
 
 /// Returns eight raw u32 keystream limbs for one counter block.
 pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 8] {
-    let cv = unpack_to_cv(ctr_key);
+    let cv = encoding::word_to_cv(ctr_key);
     let mut counter_block = [Felt::ZERO; 8];
     counter_block[0] = Felt::from_u32(counter);
 
-    BlakeG::compress_raw(cv, encode_felt_block(&counter_block))
+    compression::compress_raw_cv(cv, encoding::encode_felt_block(&counter_block))
 }
 
 /// Encrypts canonical field elements as expanded u32 limbs.
@@ -80,7 +70,7 @@ pub fn encrypt_felts_expanded(key: Word, nonce: Word, plaintext: &[Felt]) -> Vec
         let counter = u32::try_from(counter).expect("counter bound checked above");
         let keystream = keystream_block(ctr_key, counter);
         for (i, &felt) in chunk.iter().enumerate() {
-            let (lo, hi) = unpack_u32_pair(felt);
+            let (lo, hi) = encoding::unpack_felt(felt);
             ciphertext.push(Felt::from_u32(lo ^ keystream[2 * i]));
             ciphertext.push(Felt::from_u32(hi ^ keystream[2 * i + 1]));
         }

@@ -1,4 +1,4 @@
-//! Focused tests for VM uint caps.
+//! Focused tests for VM uint chain contexts.
 
 use miden_core::{Felt, utils::Matrix};
 use miden_precompiles::{UintDomain, UintPrecompile};
@@ -7,7 +7,7 @@ use crate::{
     math::U256,
     session::Session,
     transcript::{
-        eidos::{EidosCap, EidosDigest, trace::EidosRequires},
+        eidos::{EidosChainContext, EidosDigest, trace::EidosRequires},
         eval::{
             COL_BOUND_PTR, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_PIN_CLAIM_PIN_PTR,
             COL_PTR, COL_TAG_ARG1, COL_UINT_VALUE_BOUND_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
@@ -30,18 +30,18 @@ fn value_words(limbs: [u32; 8]) -> ([Felt; 4], [Felt; 4]) {
 }
 
 #[test]
-fn uint_value_hash_matches_vm_node_and_eq_op_cap() {
+fn uint_value_hash_matches_vm_node_and_eq_op_context() {
     let domain = UintDomain::U256;
     let value_limbs = limbs(0x1234_5678);
     let (lo, hi) = value_words(value_limbs);
     let value_node = UintPrecompile::value_node(domain, value_limbs);
 
     let actual_value =
-        EidosRequires::digest_of(EidosCap::uint_value(domain.bound_ptr()), &[(lo, hi)]);
+        EidosRequires::digest_of(EidosChainContext::uint_value(domain.bound_ptr()), &[(lo, hi)]);
     assert_eq!(actual_value, EidosDigest::from(value_node.digest()));
 
     assert_eq!(
-        EidosCap::uint_op(UintOpId::Is).as_array(),
+        EidosChainContext::uint_op(UintOpId::Is).as_array(),
         [
             UintPrecompile::id(),
             Felt::new(UintPrecompile::EQ_OP_ID).expect("uint EQ op id must fit in a felt"),

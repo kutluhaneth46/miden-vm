@@ -46,8 +46,8 @@ impl Plan {
     }
 }
 
-/// Solve for iteration counts that reproduce the target's hard core, chiplets, and BlakeG totals
-/// plus its advisory memory composition.
+/// Solve for iteration counts that reproduce the target's hard core, chiplets, and Eidos
+/// compression totals plus its advisory memory composition.
 pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let mut iters: BTreeMap<&'static str, f64> =
         SNIPPETS.iter().map(|s| (s.name, 0.0_f64)).collect();
@@ -55,7 +55,7 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let component_target = |c: Component| -> f64 {
         match c {
             Component::Core => target.totals.core_rows as f64,
-            Component::Hasher => target.hasher_work_rows() as f64,
+            Component::EidosCompression => target.totals.eidos_compression_rows as f64,
             // The chiplets total includes one mandatory structural padding row. Snippets only
             // need to reproduce the work rows that precede it.
             Component::Chiplets => target.totals.chiplets_rows.saturating_sub(1) as f64,
@@ -121,7 +121,7 @@ mod tests {
     fn shape_of(
         core_rows: u64,
         byte_pair_lookup_rows: u64,
-        blakeg: u64,
+        eidos_compression: u64,
         controller_hasher: u64,
         bitwise: u64,
         memory: u64,
@@ -136,51 +136,59 @@ mod tests {
         let totals = TraceTotals {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
-            blakeg_compression_rows: blakeg,
+            eidos_compression_rows: eidos_compression,
             byte_pair_lookup_rows,
         };
         TraceShape::new(totals, breakdown)
     }
 
-    fn low_hasher_target() -> TraceShape {
-        // core/hasher ratio of ~8, well below the intrinsic core/4 floor. Memory kept modest
-        // (ratio core/memory ~30) so the test exercises the hasher-feasibility path without making
-        // it infeasible via memory overshoot into core.
+    fn low_compression_target() -> TraceShape {
+        // The compression target is below the intrinsic work added by core and memory generation.
         shape_of(68900, 40000, 8200, 8200, 0, 2300)
     }
 
-    fn high_hasher_target() -> TraceShape {
-        // A high standalone BlakeG target with a much smaller controller-chiplets target cannot
-        // be supplied by the memory filler alone, so the plan must contain explicit bcompress work.
+    fn high_compression_target() -> TraceShape {
+        // A high standalone Eidos compression target with a much smaller controller-chiplets target
+        // cannot be supplied by the memory filler alone, so the plan must contain explicit
+        // compress work.
         shape_of(16000, 0, 32000, 1000, 0, 2000)
     }
 
     #[test]
-    fn low_hasher_target_does_not_add_bcompress() {
+    fn low_compression_target_does_not_add_compress() {
         let cal = calibrate().expect("calibrate");
-        let plan = solve(&cal, &low_hasher_target());
+        let plan = solve(&cal, &low_compression_target());
         assert_eq!(
-            plan.iters("hasher"),
+            plan.iters("eidos_compression"),
             0,
-            "when the decoder (via memory + pad) already overshoots the hasher target, no bcompress iterations should be added",
+            "when unavoidable work already exceeds the compression target, no compress iterations should be added",
         );
         assert!(plan.iters("memory") > 0);
     }
 
     #[test]
-    fn high_hasher_target_requires_bcompress() {
+    fn high_compression_target_requires_compress() {
         let cal = calibrate().expect("calibrate");
-        let plan = solve(&cal, &high_hasher_target());
+        let plan = solve(&cal, &high_compression_target());
         assert!(
-            plan.iters("hasher") > 0,
-            "a hasher target above the core-induced floor should require bcompress iterations",
+            plan.iters("eidos_compression") > 0,
+            "a compression target above the core-induced floor should require compress iterations",
         );
+    }
+
+    #[test]
+    fn controller_hasher_rows_do_not_substitute_for_compression_target() {
+        let cal = calibrate().expect("calibrate");
+        let target = shape_of(16_000, 0, 0, 32_000, 0, 2_000);
+        let plan = solve(&cal, &target);
+
+        assert_eq!(plan.iters("eidos_compression"), 0);
     }
 
     #[test]
     fn emitted_program_matches_padded_bracket() {
         let cal = calibrate().expect("calibrate");
-        let target = low_hasher_target();
+        let target = low_compression_target();
         let plan = solve(&cal, &target);
         let source = emit(&plan);
         let actual = measure_program(&source).expect("measure emitted program");

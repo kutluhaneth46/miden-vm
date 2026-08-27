@@ -9,7 +9,7 @@
 //! - chiplet responses (memory / bitwise / hasher replies).
 //! - hash-kernel virtual table.
 //! - shared wiring column: ACE wiring + hasher compression link.
-//! - final hasher digest returns.
+//! - four-Felt hasher result and chaining-value returns.
 //!
 //! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. All current adapters use
 //! the default path, which reads the chiplet selector columns; the hook exists so a future adapter

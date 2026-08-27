@@ -141,12 +141,12 @@ It performs two related Eidos operations:
 
 Each controller row contains both the compression input and output. A typed compression-link
 message binds its complete `(block, cv_in, cv_out)` tuple to one physical 32-row cycle in
-`BlakeGCompressionAir`. Identical tuples may share one provider cycle through multiplicity without
+`EidosCompressionAir`. Identical tuples may share one provider cycle through multiplicity without
 removing any decoder/controller request.
 
 #### Simple two-to-one hash
 
-The decoder initializes the BlakeG chaining value from the control-block opcode and places the two
+The decoder initializes the Eidos chaining value from the control-block opcode and places the two
 child words in the block. At controller address `r`, it consumes a full-state input message and a
 digest-return message. Both messages use node index zero and the same row address. The explicit
 bus domains distinguish the input and output even though they share an address.
@@ -154,8 +154,8 @@ bus domains distinguish the input and output even though they share an address.
 #### Sequential hash
 
 The first block contributes a full-state input message at address `r`. Each following block
-contributes a rate-only absorption message at the next controller address. The controller AIR
-constrains that row's input chaining value to equal the previous row's output digest.
+contributes a next-block absorption message at the next controller address. The controller AIR
+constrains that row's input chaining value to equal the previous row's output chaining value.
 
 The final block also supplies the digest-return message at its own address. Thus, for a stream of
 `k` blocks, controller addresses run from `r` through `r + k - 1`, and the result is returned at
@@ -286,7 +286,7 @@ When the VM executes a `SPLIT` operation, it does the following:
 
 #### LOOP operation
 
-Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below. The remaining registers $h_4, ..., h_7$ are set to $0$ so the hash input is padded to a full 8-element rate.
+Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below. The remaining registers $h_4, ..., h_7$ are set to $0$ to complete the 8-element Eidos block.
 
 ![decoder_loop_operation](../../img/design/decoder/decoder_loop_operation.png)
 

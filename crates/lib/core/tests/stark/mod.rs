@@ -166,7 +166,7 @@ fn aux_trace_proof_order_dispatch_matches_every_rust_variant() {
             begin
                 push.{core} exec.layout::set_core_trace_length_log
                 push.{chiplets} exec.layout::set_chiplets_trace_length_log
-                push.{blakeg} exec.layout::set_blakeg_compression_trace_length_log
+                push.{eidos_compression} exec.layout::set_eidos_compression_trace_length_log
                 push.{and8} exec.layout::set_and8_lookup_trace_length_log
                 push.{tag} exec.constants::set_order_tag
                 exec.aux_trace::push_proof_order_log_heights
@@ -178,7 +178,7 @@ fn aux_trace_proof_order_dispatch_matches_every_rust_variant() {
             ",
             core = INSTANCE_LOG_HEIGHTS[0],
             chiplets = INSTANCE_LOG_HEIGHTS[1],
-            blakeg = INSTANCE_LOG_HEIGHTS[2],
+            eidos_compression = INSTANCE_LOG_HEIGHTS[2],
             and8 = INSTANCE_LOG_HEIGHTS[3],
             output_ptr = ORDER_OUTPUT_PTR,
             output_ptr_plus_1 = ORDER_OUTPUT_PTR + 1,
@@ -1312,7 +1312,7 @@ fn eidos_absorb_block_matches_rust_challenger() {
 }
 
 #[test]
-fn eidos_hash_elements_single_block_matches_masm_bcompress_loop() {
+fn eidos_hash_elements_single_block_matches_masm_compress_loop() {
     const HASH_WORD_PTR: u32 = 1000;
 
     let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, 8);
@@ -1322,7 +1322,7 @@ fn eidos_hash_elements_single_block_matches_masm_bcompress_loop() {
             push.{cv3}.{cv2}.{cv1}.{cv0}
             push.8.7.6.5
             push.4.3.2.1
-            bcompress
+            compress
             dropw dropw
             push.{HASH_WORD_PTR} mem_storew_le
             dropw
@@ -1344,7 +1344,7 @@ fn eidos_hash_elements_single_block_matches_masm_bcompress_loop() {
 }
 
 #[test]
-fn eidos_hash_elements_adv_pipe_loop_matches_masm_bcompress_loop() {
+fn eidos_hash_elements_adv_pipe_loop_matches_masm_compress_loop() {
     const HASH_WORD_PTR: u32 = 1000;
     const STREAM_PTR: u32 = 1 << 16;
 
@@ -1360,7 +1360,7 @@ fn eidos_hash_elements_adv_pipe_loop_matches_masm_bcompress_loop() {
             padw padw
             repeat.2
                 adv_pipe
-                bcompress
+                compress
             end
             dropw dropw
             movup.4 drop
@@ -1383,7 +1383,7 @@ fn eidos_hash_elements_adv_pipe_loop_matches_masm_bcompress_loop() {
 }
 
 #[test]
-fn eidos_hash_elements_advice_map_loop_matches_masm_bcompress_loop() {
+fn eidos_hash_elements_advice_map_loop_matches_masm_compress_loop() {
     const STREAM_PTR: u32 = 1 << 16;
 
     let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
@@ -1410,7 +1410,7 @@ fn eidos_hash_elements_advice_map_loop_matches_masm_bcompress_loop() {
             padw padw
             repeat.2
                 adv_pipe
-                bcompress
+                compress
             end
             dropw dropw
             movup.4 drop
@@ -1513,7 +1513,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
             push.10 exec.layout::set_core_trace_length_log
             push.10 exec.layout::set_chiplets_trace_length_log
-            push.10 exec.layout::set_blakeg_compression_trace_length_log
+            push.10 exec.layout::set_eidos_compression_trace_length_log
             push.16 exec.layout::set_and8_lookup_trace_length_log
             push.16 exec.constants::set_trace_length_log
             push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw

@@ -37,7 +37,7 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Procedures and execution contexts.** Miden assembly programs can be broken into subroutines called _procedures_, and program execution can span multiple isolated contexts, each with its own dedicated memory space. The contexts are separated into the _root context_ and _user contexts_. The root context can be accessed from user contexts via customizable kernel calls.
 - **Memory.** Miden VM supports read-write random-access memory. Procedures can reserve portions of global memory for easier management of local variables.
 - **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers
-  (arithmetic, comparison, and bitwise operations), Eidos/BlakeG hashing and AEAD streaming, and
+  (arithmetic, comparison, and bitwise operations), Eidos hashing and AEAD streaming, and
   built-in Merkle-path verification.
 - **External libraries.** Miden VM supports compiling programs against pre-defined libraries. The VM ships with one such library: Miden `miden-core-lib` which adds support for such things as 64-bit unsigned integers. Developers can build other similar libraries to extend the VM's functionality in ways which fit their use cases.
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
@@ -163,9 +163,10 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 ### Recursion-friendly proofs
 
 Proofs in the above benchmarks are generated using BLAKE3. While BLAKE3 is fast on conventional
-processors, it is not efficient to execute inside the VM. The VM's native Eidos transcript and
-BlakeG compression are designed for recursive proof verification. Optional proof-hash
-configurations, including Poseidon2, remain available for compatibility and comparison.
+processors, it is not efficient to execute inside the VM. The VM-native Eidos construction—its
+framed transcript and underlying compression—is designed for recursive proof verification.
+Optional proof-hash configurations, including Poseidon2, remain available for compatibility and
+comparison.
 
 The historical comparison below uses the optional Poseidon2 STARK proof-hash configuration. It
 predates the native Eidos cutover and does not describe the current VM hash topology:

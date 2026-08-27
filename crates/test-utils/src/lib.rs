@@ -1011,15 +1011,16 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Computes one expected BCOMPRESS state transition.
+/// Computes one expected COMPRESS state transition.
 ///
-/// The block lanes are preserved and the chaining-value lanes are replaced with the BlakeG output.
-pub fn build_expected_bcompress(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for bcompress test");
+/// The block lanes are preserved and the chaining-value lanes are replaced with the
+/// Eidos compression output.
+pub fn build_expected_compress(values: &[u64]) -> [Felt; STATE_WIDTH] {
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for compress test");
 
     // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
-    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    // => state[0..12] = stack[0..12] in [BLOCK_LO, BLOCK_HI, CV] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
         state[i] = Felt::new_unchecked(values[i]);
@@ -1027,7 +1028,7 @@ pub fn build_expected_bcompress(values: &[u64]) -> [Felt; STATE_WIDTH] {
 
     compress_state(&mut state);
 
-    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    // Map internal state back to stack layout [BLOCK_LO, BLOCK_HI, CV'].
     let mut out = [ZERO; STATE_WIDTH];
     out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
 

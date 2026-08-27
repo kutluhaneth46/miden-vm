@@ -13,7 +13,7 @@ begin
     # => [BLOCK_LO=ZERO_WORD, BLOCK_HI=ZERO_WORD, CV, addr=0]
 
     repeat.50
-        adv_pipe bcompress
+        adv_pipe compress
     end
     # => [BLOCK_LO, BLOCK_HI, DIGEST, addr]
 

@@ -265,12 +265,12 @@ proc recover_digest
     exec.load_recovery_signature_k1
     # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
 
-    # Stream the candidate point into local memory. The sponge words are scratch; no digest is
-    # derived from the untrusted advice here.
+    # Stream the candidate point into local memory. The Eidos block words and chaining word are
+    # scratch; no digest is derived from the untrusted advice here.
     locaddr.0 padw padw padw
     adv_pipe
     adv_pipe
-    # => [QY_RATE[8], C, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    # => [QY_BLOCK[8], CV, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
     dropw dropw dropw sub.16
     # => [pubkey_ptr=loc[0], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
     exec.secp256k1::load_mem
@@ -302,18 +302,18 @@ end
 #! Output: [pubkey_ptr + 16, ...]
 proc load_and_verify_public_key
     # Since there are exactly 16 elements, Eidos binds that count into its initial chaining word and
-    # requires no partial-block padding. `adv_pipe` exposes each written chunk in the rate slots in the same
+    # requires no partial-block padding. `adv_pipe` exposes each written chunk in the block slots in the same
     # order that `mem_stream` would read it back from memory.
     push.16 exec.eidos::init_chaining_word padw padw
-    # => [R0=0w, R1=0w, C, write_ptr=pubkey_ptr, PK_COMM, ...]
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, write_ptr=pubkey_ptr, PK_COMM, ...]
     adv_pipe
-    # => [QX_RATE[8], C, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    # => [QX_BLOCK[8], CV, write_ptr=pubkey_ptr+8, PK_COMM, ...]
     exec.eidos::compress
-    # => [R0, R1, C, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr=pubkey_ptr+8, PK_COMM, ...]
     adv_pipe
-    # => [QY_RATE[8], C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    # => [QY_BLOCK[8], CV, write_ptr=pubkey_ptr+16, PK_COMM, ...]
     exec.eidos::compress
-    # => [R0, R1, C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr=pubkey_ptr+16, PK_COMM, ...]
     exec.eidos::digest
     # => [PK_HASH, write_ptr=pubkey_ptr+16, PK_COMM, ...]
     movup.4 movdn.8

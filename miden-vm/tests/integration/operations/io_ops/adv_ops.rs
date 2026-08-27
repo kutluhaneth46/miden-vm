@@ -117,14 +117,14 @@ fn adv_pipe() {
 }
 
 #[test]
-fn adv_pipe_with_bcompress() {
+fn adv_pipe_with_compress() {
     let source = format!(
         "
         {TRUNCATE_STACK_PROC}
 
         begin
             push.12.11.10.9.8.7.6.5.4.3.2.1
-            adv_pipe bcompress
+            adv_pipe compress
 
             exec.truncate_stack
         end"
@@ -136,7 +136,7 @@ fn adv_pipe_with_bcompress() {
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
-    // Apply one BlakeG compression to the state.
+    // Apply one Eidos compression to the state.
     compress_state(&mut state);
 
     // to get the final state of the stack, reverse the hasher state and push the expected address

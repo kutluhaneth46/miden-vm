@@ -8,7 +8,7 @@
 //! [`UintLimbs`](crate::relations::BusId::UintLimbs) (raw 8×16) buses.
 //! Arithmetic lives in the [`add`] / [`mul`] relation AIRs over those
 //! views; hashing into the transcript is the eval chip's job, which
-//! pulls the 4×32 view below and pins it into its Eidos rate lanes.
+//! pulls the 4×32 view below and pins it into its Eidos block lanes.
 //!
 //! See the design notes for the full design.
 //!

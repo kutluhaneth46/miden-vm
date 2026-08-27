@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, ONE, Word, ZERO,
     chiplets::{
-        blakeg,
+        eidos_compression,
         hasher::{Hasher, compress_state},
     },
     crypto::merkle::{MerklePath, MerkleStore, MerkleTree, NodeIndex},
@@ -13,9 +13,8 @@ use miden_core::{
 use proptest::prelude::*;
 
 use super::{
-    op_aead_stream, op_bcompress, op_horner_eval_base, op_horner_eval_ext, op_mpverify,
-    op_mrupdate, validate_materialized_merkle_path_length, validate_merkle_depth,
-    validate_merkle_path_length,
+    op_aead_stream, op_compress, op_horner_eval_base, op_horner_eval_ext, op_mpverify, op_mrupdate,
+    validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
 use crate::{
     AdviceInputs, ContextId,
@@ -35,7 +34,7 @@ const ALPHA_ADDR: u64 = 1000;
 
 proptest! {
     #[test]
-    fn test_op_bcompress(
+    fn test_op_compress(
         // Input state: 12 elements for the hasher state (positions 0-11)
         s0 in any::<u64>(),
         s1 in any::<u64>(),
@@ -102,17 +101,18 @@ proptest! {
         };
 
         // Execute the operation
-        let _ = op_bcompress(&mut processor, &mut tracer);
+        let _ = op_compress(&mut processor, &mut tracer);
         processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
 
-        // bcompress preserves the 8-felt block and writes the digest into the CV word.
+        // compress preserves the 8-felt block and writes the updated chaining value into the CV
+        // word.
         for i in 0..8 {
             prop_assert_eq!(stack[15 - i], stack_inputs[i], "block mismatch at position {}", i);
         }
-        for (j, i) in Hasher::DIGEST_RANGE.enumerate() {
+        for (j, i) in Hasher::CV_RANGE.enumerate() {
             prop_assert_eq!(stack[15 - (8 + j)], expected_state[i], "CV mismatch at lane {}", j);
         }
 
@@ -215,10 +215,10 @@ proptest! {
             felt(k2),
             felt(k3),
         ];
-        let keystream = blakeg::compress_raw_xof_lanes(&input_state);
+        let keystream = eidos_compression::compress_raw_xof_lanes(&input_state);
         let plaintext = [plaintext_word1, plaintext_word2];
         let expected_ciphertext: [Felt; 16] = core::array::from_fn(|i| {
-            let (lo, hi) = blakeg::unpack(plaintext[i / 8][(i % 8) / 2]);
+            let (lo, hi) = eidos_compression::unpack(plaintext[i / 8][(i % 8) / 2]);
             let p = if i % 2 == 0 { lo } else { hi };
             Felt::from_u32(p ^ keystream[i])
         });

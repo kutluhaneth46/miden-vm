@@ -139,7 +139,7 @@ When the value in `in_span` column is set to $1$, control flow operations cannot
 ## Block hash computation constraints
 As described [previously](./index.md#program-block-hashing), when the VM starts executing a new block, it also initiates computation of the block's hash. There are two separate methodologies for computing block hashes.
 
-For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element block). For *dyn*, the first half holds the callee digest read from memory and the second half of the hasher registers ($h_4,\dots,h_7$) is constrained to $0$; the digest itself may be the zero word. The hasher is initialized using the hash controller, and we use the controller-row address as the block's ID. A controller row overlays both the compression input and its digest return, so `END` reads the result at the same address.
+For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element block). For *dyn*, the first half holds the callee digest read from memory and the second half of the hasher registers ($h_4,\dots,h_7$) is constrained to $0$; the digest itself may be the zero word. The hasher is initialized using the hash controller, and we use the controller-row address as the block's ID. A controller row overlays both the compression input and its output chaining value; for these framed block-hash operations, that value is the block digest read by `END` at the same address.
 
 For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash controller at the start of the block, and we use the address of the first controller row as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch uses the next controller row, so the batch address is incremented by $1$. We read the result from that final controller row when the `END` operation is executed for the block.
 
@@ -156,8 +156,8 @@ H_k(addr, node, payload) =
 P_k + addr + \beta \cdot node + \sum_{i=0}^{|payload|-1} \beta^{i+2} \cdot payload_i.
 $$
 
-The message kind selects a distinct prefix for a full-state initialization, rate-only absorption,
-or digest return. Decoder block-hash messages use node index zero. Let
+The message kind selects a distinct prefix for a full-state initialization, next-block absorption,
+or four-Felt result/CV return. Decoder block-hash messages use node index zero. Let
 $d = \sum_{i=0}^6(b_i \cdot 2^i)$ denote the opcode value. Let $CV(d)$ denote the Eidos
 two-to-one chaining word derived from that opcode, and let $CV_{span}(gc)$ denote the basic-block
 chaining word derived from its logical operation-group count.
@@ -257,13 +257,13 @@ u_{dyncall} = f_{dyncall} \cdot h_{dynordyncall} \cdot m_{dynordyncall} \cdot m_
 $$
 
 In the above, $h_{dynordyncall}$ is the control-block request carrying the callee digest in its
-first rate word, zero padding in its second rate word, and the opcode-derived chaining word.
+first block word, zero padding in its second block word, and the opcode-derived chaining word.
 $m_{dynordyncall}$ represents a memory **word** read request from address
 $s_0$, where the result is placed in the first half of the decoder hasher trace.
 Note that similar to `CALL`, `DYNCALL` also creates a new memory context, and hence
 must also initialize the `fmp`.
 
-When `SPAN` operation is executed, a new hasher is initialized and contents of $h_0, ..., h_7$ are absorbed into the hasher. The state capacity is the Eidos chaining word $CV_{span}(gc)$, which binds the logical operation-group count:
+When `SPAN` operation is executed, a new hasher is initialized and contents of $h_0, ..., h_7$ are absorbed into the hasher. The input CV is $CV_{span}(gc)$, which binds the logical operation-group count:
 
 $$
 u_{span} = f_{span} \cdot h_{span} \text{ | degree} = 6

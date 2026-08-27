@@ -2,7 +2,7 @@
 //!
 //! Registry construction visits every proof ordering of a multi-AIR composition. This
 //! factory builds the order-invariant work exactly once — the factored circuit, the
-//! sponge state after absorbing the constants section, and the common-section digest —
+//! chaining state after absorbing the constants section, and the common-section digest —
 //! so that each ordering costs only its shuffle bytes plus a short resumed hash
 //! ([`FactoredCircuitFactory::leaf_for_order`]), or one assembly plus that same resumed
 //! hash when the full instruction stream is needed
@@ -14,7 +14,7 @@
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::{
     field::ExtensionField,
-    hash::eidos::{PACKED_LANES, PackedBlock, PackedDigest, RATE},
+    hash::eidos::{BLOCK_LEN, PACKED_LANES, PackedBlock, PackedDigest},
 };
 
 use crate::{
@@ -58,7 +58,7 @@ pub struct FactoredEncodedCircuit {
 /// Factory caching the order-invariant parts of a factored multi-AIR composition.
 pub struct FactoredCircuitFactory<EF> {
     factored: FactoredMultiAirCircuit<EF>,
-    /// Sponge state after absorbing the constants section.
+    /// Chaining state after absorbing the constants section.
     ///
     /// The constants section is byte-identical for every proof order and a whole number
     /// of Eidos blocks. Every order has the same prefix length, so the length-bound Eidos
@@ -81,7 +81,7 @@ where
     /// Encodes the canonical (identity) order once to fix the constants and common
     /// sections, then proves the encode-only leaf path against that assembled stream on
     /// the deployed composition: the canonical order's shuffle window must match byte
-    /// for byte, and the resumed sponge must reproduce the digest of the full prefix.
+    /// for byte, and the resumed chaining state must reproduce the digest of the full prefix.
     /// Divergence between the two paths is configuration-dependent (it hides in the
     /// padding arithmetic), so a fixture test elsewhere cannot stand in for this check.
     pub fn new(factored: FactoredMultiAirCircuit<EF>) -> Result<Self, AceError> {
@@ -91,12 +91,12 @@ where
         let instructions = encoded.instructions();
         let const_felts = encoded.num_constants() * EXT_DEGREE;
         let prefix_len = const_felts + factored.num_shuffle_ops();
-        if !const_felts.is_multiple_of(RATE)
-            || !prefix_len.is_multiple_of(RATE)
+        if !const_felts.is_multiple_of(BLOCK_LEN)
+            || !prefix_len.is_multiple_of(BLOCK_LEN)
             || prefix_len >= instructions.len()
         {
             return Err(AceError::InvalidInputLayout {
-                message: "ACE stream sections must be rate-aligned for prefix resumption".into(),
+                message: "ACE stream sections must be block-aligned for prefix resumption".into(),
             });
         }
 
@@ -105,7 +105,7 @@ where
                 message: "ACE stream prefix length must fit in Eidos's u32 length binding".into(),
             })?;
         let mut constants_state = Eidos::init_chaining_word(0, prefix_len_u32);
-        absorb_rate_blocks(&mut constants_state, &instructions[..const_felts]);
+        compress_blocks(&mut constants_state, &instructions[..const_felts]);
         let common_commitment = Eidos::hash_elements(&instructions[prefix_len..]);
 
         let mut buffer = ShuffleEncodeBuffer::new();
@@ -116,7 +116,7 @@ where
             });
         }
         let mut resumed = constants_state;
-        absorb_rate_blocks(&mut resumed, fast);
+        compress_blocks(&mut resumed, fast);
         if resumed != Eidos::hash_elements(&instructions[..prefix_len]) {
             return Err(AceError::InvalidInputLayout {
                 message: "resumed prefix hash diverges from hashing the full prefix".into(),
@@ -144,7 +144,7 @@ where
     /// Compute the registry leaf for one proof order without assembling its circuit.
     ///
     /// Encodes only the shuffle section into `buffer` and resumes the cached
-    /// post-constants sponge state, so a caller enumerating every ordering pays per
+    /// post-constants chaining state, so a caller enumerating every ordering pays per
     /// leaf only the per-order bytes and their hash — this is what makes an `n!`-leaf
     /// registry build feasible. Equality with [`Self::circuit_for_order`]'s
     /// `commitment` is pinned at construction (canonical order) and must be re-pinned
@@ -156,7 +156,7 @@ where
     ) -> Result<Word, AceError> {
         let shuffle = self.factored.encode_shuffle_section_for_order(proof_order, buffer)?;
         let mut state = self.constants_state;
-        absorb_rate_blocks(&mut state, shuffle);
+        compress_blocks(&mut state, shuffle);
         let shuffle_commitment = state;
         Ok(Eidos::merge(&[shuffle_commitment, self.common_commitment]))
     }
@@ -188,26 +188,26 @@ where
                 scratch.streams[lane].extend_from_slice(shuffle);
             }
 
-            // Resume the (order-invariant) post-constants sponge state in every lane and
+            // Resume the order-invariant post-constants chaining state in every lane and
             // absorb the per-lane shuffle sections in lockstep.
             let mut state: PackedDigest =
                 core::array::from_fn(|element| [self.constants_state[element]; LEAF_LANES]);
-            // Rate alignment is established at construction; assert rather than debug_assert
+            // Block alignment is established at construction; assert rather than debug_assert
             // so a miscount cannot silently truncate a hashed block in a release build.
             assert!(
-                scratch.streams[0].len().is_multiple_of(RATE),
-                "shuffle streams must be rate-aligned"
+                scratch.streams[0].len().is_multiple_of(BLOCK_LEN),
+                "shuffle streams must be block-aligned"
             );
-            let blocks = scratch.streams[0].len() / RATE;
+            let blocks = scratch.streams[0].len() / BLOCK_LEN;
             for block in 0..blocks {
-                let mut packed_block: PackedBlock = [[Felt::ZERO; LEAF_LANES]; RATE];
+                let mut packed_block: PackedBlock = [[Felt::ZERO; LEAF_LANES]; BLOCK_LEN];
                 for (i, packed_elements) in packed_block.iter_mut().enumerate() {
                     for (packed_element, stream) in packed_elements.iter_mut().zip(&scratch.streams)
                     {
-                        *packed_element = stream[block * RATE + i];
+                        *packed_element = stream[block * BLOCK_LEN + i];
                     }
                 }
-                state = Eidos::compress_packed_block(state, packed_block);
+                state = Eidos::compress_packed(state, packed_block);
             }
 
             let common: PackedDigest =
@@ -225,7 +225,7 @@ where
     /// Assemble, encode, and hash the circuit for one proof order.
     ///
     /// Only the shuffle section is hashed live (resuming from the cached post-constants
-    /// sponge state); the common-section digest is reused. The resulting commitments
+    /// chaining state); the common-section digest is reused. The resulting commitments
     /// are definitionally equal to hashing the full stream segments, which the caller's
     /// segment tests pin per order.
     pub fn circuit_for_order(
@@ -247,7 +247,7 @@ where
         }
         let shuffle_prefix_len = self.const_felts + self.factored.num_shuffle_ops();
         if encoded.num_constants() * EXT_DEGREE != self.const_felts
-            || !stream_len.is_multiple_of(RATE)
+            || !stream_len.is_multiple_of(BLOCK_LEN)
             || shuffle_prefix_len >= stream_len
         {
             return Err(AceError::InvalidInputLayout {
@@ -256,7 +256,7 @@ where
         }
 
         let mut state = self.constants_state;
-        absorb_rate_blocks(&mut state, &instructions[self.const_felts..shuffle_prefix_len]);
+        compress_blocks(&mut state, &instructions[self.const_felts..shuffle_prefix_len]);
         let shuffle_commitment = state;
         let common_commitment = self.common_commitment;
         let commitment = Eidos::merge(&[shuffle_commitment, common_commitment]);
@@ -271,15 +271,15 @@ where
     }
 }
 
-/// Absorb whole rate blocks into an initialized Eidos chaining word.
-fn absorb_rate_blocks(state: &mut Word, elements: &[Felt]) {
+/// Compress complete Eidos blocks under an initialized chaining word.
+fn compress_blocks(state: &mut Word, elements: &[Felt]) {
     // Ignoring a trailing partial block would yield a wrong digest; assert rather than
     // debug_assert so a miscount cannot survive a release build.
     assert!(
-        elements.len().is_multiple_of(RATE),
-        "sponge absorption requires whole rate blocks"
+        elements.len().is_multiple_of(BLOCK_LEN),
+        "Eidos compression requires complete blocks"
     );
-    for &block in elements.as_chunks::<RATE>().0 {
-        *state = Eidos::compress_block(*state, block);
+    for &block in elements.as_chunks::<BLOCK_LEN>().0 {
+        *state = Eidos::compress(*state, block);
     }
 }

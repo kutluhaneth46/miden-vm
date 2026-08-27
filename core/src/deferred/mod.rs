@@ -45,11 +45,12 @@ pub const DEFERRED_CHUNKS_DOMAIN: Felt = domain_selector(DEFERRED_CHUNKS_DOMAIN_
 /// Eidos domain selector for tagged, precompile-owned nodes.
 pub const DEFERRED_NODE_DOMAIN: Felt = domain_selector(DEFERRED_NODE_DOMAIN_ID, 1);
 
-/// Fixed Eidos chaining word used by the VM's one-compression deferred-root fold.
+/// Fixed initial Eidos chaining value for deferred AND nodes and rolling-root folds.
 ///
-/// This is `Eidos::init_chaining_word(DEFERRED_AND_DOMAIN, 8)`. It is spelled out so the
-/// consensus-critical value remains a `const` usable by AIR definitions.
-pub const DEFERRED_ROOT_DOMAIN: Word = Word::new([
+/// This is
+/// `Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8)`. It is spelled out
+/// so the consensus-critical value remains a `const` usable by AIR definitions.
+pub const DEFERRED_AND_INIT_CV: Word = Word::new([
     Felt::new_unchecked(4280581858871862887),
     Felt::new_unchecked(2688637133034287986),
     Felt::new_unchecked(1947077364429095681),
@@ -143,9 +144,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deferred_root_chaining_word_matches_its_eidos_derivation() {
+    fn deferred_and_init_cv_matches_its_eidos_derivation() {
         assert_eq!(
-            DEFERRED_ROOT_DOMAIN,
+            DEFERRED_AND_INIT_CV,
             Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8),
         );
     }

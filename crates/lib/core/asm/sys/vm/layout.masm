@@ -4,7 +4,7 @@ use miden::core::stark::constants
 ###
 ### The per-AIR log heights live in the generic array (`constants::air_trace_length_logs_ptr`);
 ### this module only fixes which AIR occupies which offset: core 0, chiplets 1,
-### BlakeG compression 2, and And8 lookup 3 — the canonical instance order the proof order sorts
+### Eidos compression 2, and And8 lookup 3 — the canonical instance order the proof order sorts
 ### against.
 ###
 ### The generic verifier in `stark/` owns the addresses it dereferences; everything
@@ -62,7 +62,7 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##                       --> [ fixed stark vars         ]  slots 0..10
 ##                           [ core selectors           ]  slots 11..13
 ##                           [ chiplets selectors       ]  slots 14..16
-##                           [ BlakeG selectors         ]  slots 17..19
+##                           [ Eidos compression selectors        ]  slots 17..19
 ##                           [ And8 selectors           ]  slots 20..22
 ##                           [ alignment pad            ]  slot 23
 ##   ACE_CIRCUIT_STREAM_PTR
@@ -109,11 +109,11 @@ pub proc get_chiplets_trace_length_log
     exec.constants::air_trace_length_logs_ptr add.1 mem_load
 end
 
-pub proc set_blakeg_compression_trace_length_log
+pub proc set_eidos_compression_trace_length_log
     exec.constants::air_trace_length_logs_ptr add.2 mem_store
 end
 
-pub proc get_blakeg_compression_trace_length_log
+pub proc get_eidos_compression_trace_length_log
     exec.constants::air_trace_length_logs_ptr add.2 mem_load
 end
 

@@ -142,7 +142,7 @@ fn test_get_op_index_degree6() {
 #[test]
 fn test_get_op_index_degree5() {
     // Degree 5 operations have opcodes 80-95
-    assert_eq!(get_op_index(opcodes::BCOMPRESS), 0);
+    assert_eq!(get_op_index(opcodes::COMPRESS), 0);
     assert_eq!(get_op_index(opcodes::MPVERIFY), 1);
     assert_eq!(get_op_index(opcodes::SPLIT), 4);
     assert_eq!(get_op_index(opcodes::LOOP), 5);
@@ -431,10 +431,10 @@ fn composite_hash_state_tail_flags() {
     }
 }
 
-/// Tests BCOMPRESS, which preserves the block and tail while updating the CV.
+/// Tests COMPRESS, which preserves the block and tail while updating the CV.
 #[test]
-fn composite_bcompress_flags() {
-    let op_flags = op_flags_for_opcode(opcodes::BCOMPRESS.into());
+fn composite_compress_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::COMPRESS.into());
 
     for i in 0..8 {
         assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE");
@@ -716,7 +716,7 @@ fn control_flow_flag() {
         Operation::Swap,
         Operation::Dup0,
         Operation::U32add,
-        Operation::BCompress,
+        Operation::Compress,
         Operation::MpVerify(ZERO),
     ];
 

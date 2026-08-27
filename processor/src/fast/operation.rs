@@ -6,7 +6,7 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    chiplets::{blakeg, hasher::compress_state},
+    chiplets::{eidos_compression, hasher::compress_state},
     crypto::merkle::MerklePath,
     deferred::Digest,
     program::MIN_STACK_DEPTH,
@@ -70,7 +70,7 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn bcompress(
+    fn compress(
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
@@ -87,7 +87,7 @@ impl HasherInterface for FastProcessor {
         _clk: RowIndex,
         state: HasherState,
     ) -> Result<[Felt; 16], OperationError> {
-        Ok(blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32))
+        Ok(eidos_compression::compress_raw_xof_lanes(&state).map(Felt::from_u32))
     }
 
     #[inline(always)]

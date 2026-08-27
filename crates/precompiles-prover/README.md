@@ -40,7 +40,7 @@ src/
 ├── session/            orchestration facade + addition-chain strategies
 ├── primitives/         shared bit / lookup primitives (byte_pair_lut, bitwise64)
 ├── hash/               Keccak round / sponge / node + chunk + Memory64 bus
-├── transcript/         native 32-row BlakeG/Eidos compression + transcript DAG evaluation
+├── transcript/         native 32-row Eidos compression + transcript DAG evaluation
 ├── uint/               256-bit store + add / mul relation chiplets
 ├── ec/                 group table, point store, group-law add, and msm/
 └── tests/              per-chiplet + integration tests

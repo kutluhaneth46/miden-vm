@@ -2,7 +2,7 @@
 //!
 //! Verifies that the batch implementation produces identical query indices to a reference
 //! implementation that calls `sample_bits` in a loop. Both programs start from the same
-//! sponge state and parameters, and we compare the resulting query words stored in memory.
+//! challenger state and parameters, and we compare the resulting query words stored in memory.
 
 use miden_core::Felt;
 use miden_processor::ContextId;
@@ -129,12 +129,12 @@ fn reference_source(setup: &str) -> String {
 /// Run both batch and reference programs with identical initial state, then compare
 /// all generated query words and the final `output_len`.
 fn assert_batch_matches_reference(
-    sponge: &[u64; 12],
+    challenger_state: &[u64; 12],
     output_len: u32,
     num_queries: u32,
     depth: u32,
 ) {
-    let setup = setup_masm(sponge, output_len, num_queries, depth);
+    let setup = setup_masm(challenger_state, output_len, num_queries, depth);
     let batch_src = batch_source(&setup);
     let ref_src = reference_source(&setup);
 
@@ -186,7 +186,7 @@ fn assert_batch_matches_reference(
     );
 }
 
-/// Generate a deterministic sponge state from a seed.
+/// Generate a deterministic challenger state from a seed.
 fn random_challenger_state(seed: u64) -> [u64; 12] {
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     core::array::from_fn(|_| rng.random::<u64>())
@@ -196,19 +196,18 @@ fn random_challenger_state(seed: u64) -> [u64; 12] {
 // Parametric tests
 // ---------------------------------------------------------------------------
 
-/// Test across a range of num_queries values with fixed sponge and depth.
-/// Covers: 1 query, small batches, exact rate boundary (7), one past (8, 9),
-/// typical (27), and a larger value (40 = 5 output batches).
+/// Test across a range of `num_queries` values with fixed challenger state and depth.
+/// Covers small batches, refill boundaries, the typical query count, and multiple refills.
 #[rstest]
 #[case::single_query(1)]
 #[case::two_queries(2)]
 #[case::three_queries(3)]
 #[case::seven_queries_exact_first_batch(7)]
-#[case::eight_queries_triggers_permute(8)]
-#[case::nine_queries_one_past_permute(9)]
+#[case::eight_queries_triggers_refill(8)]
+#[case::nine_queries_one_past_refill(9)]
 #[case::fifteen_queries_two_batches(15)]
 #[case::twentyseven_queries_typical(27)]
-#[case::forty_queries_five_permutes(40)]
+#[case::forty_queries_multiple_refills(40)]
 fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
     let state = random_challenger_state(42);
     assert_batch_matches_reference(&state, 3, num_queries, 17);
@@ -240,13 +239,14 @@ fn batch_vs_reference_output_len(#[case] output_len: u32) {
     assert_batch_matches_reference(&state, output_len, 27, 17);
 }
 
-/// Test with several different random sponge states to exercise varied rate element values.
+/// Test with several deterministic challenger states to exercise varied CV and cached-output
+/// values.
 #[rstest]
 #[case::seed_0(0)]
 #[case::seed_1(1)]
 #[case::seed_12345(12345)]
 #[case::seed_999999(999999)]
-fn batch_vs_reference_random_sponge(#[case] seed: u64) {
+fn batch_vs_reference_random_challenger_state(#[case] seed: u64) {
     let state = random_challenger_state(seed);
     assert_batch_matches_reference(&state, 3, 27, 17);
 }

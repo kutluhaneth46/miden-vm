@@ -208,7 +208,7 @@ const FLAGS_RESERVED_MASK: u8 = 0xfd;
 ///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
 ///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
 ///   debug-presence flag.
-/// - [0, 0, 5]: Replaced opcode 0x50's HPERM semantics with BCOMPRESS. Rejecting version 4 prevents
+/// - [0, 0, 5]: Replaced opcode 0x50's HPERM semantics with COMPRESS. Rejecting version 4 prevents
 ///   an old serialized node from retaining its stored digest while being executed with the new
 ///   operation semantics on load paths that do not recompute node digests.
 ///

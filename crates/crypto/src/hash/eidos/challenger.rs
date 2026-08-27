@@ -1,4 +1,4 @@
-//! Fiat-Shamir challenger built from BlakeG compression.
+//! Fiat-Shamir challenger built from Eidos compression.
 //!
 //! The challenger keeps a 4-felt chaining value. Absorbs compress 8-felt blocks
 //! into that value; squeezes use a transition tag and counter blocks.
@@ -10,7 +10,7 @@ use p3_challenger::{
 };
 use p3_symmetric::{Hash, MerkleCap};
 
-use super::framing::{DIGEST_WIDTH, RATE, compress_felt_block};
+use super::{BLOCK_LEN, DIGEST_WIDTH, Eidos};
 use crate::{
     Felt, Word, ZERO,
     field::{BasedVectorSpace, PrimeField64},
@@ -21,7 +21,7 @@ use crate::{
 const TRANSITION_TAG_BASE: u32 = 1;
 
 /// Squeeze tag used for counter-mode output extension.
-const SQUEEZE_TAG: Felt = Felt::new_unchecked((TRANSITION_TAG_BASE + RATE as u32) as u64);
+const SQUEEZE_TAG: Felt = Felt::new_unchecked((TRANSITION_TAG_BASE + BLOCK_LEN as u32) as u64);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum EidosChallengerMode {
@@ -37,7 +37,7 @@ enum EidosChallengerMode {
 #[derive(Clone, Debug)]
 pub struct EidosChallenger {
     cv: Word,
-    buffer: [Felt; RATE],
+    buffer: [Felt; BLOCK_LEN],
     buffer_len: usize,
     mode: EidosChallengerMode,
     counter: u32,
@@ -50,7 +50,7 @@ impl EidosChallenger {
     pub fn new(initial_cv: Word) -> Self {
         Self {
             cv: initial_cv,
-            buffer: [ZERO; RATE],
+            buffer: [ZERO; BLOCK_LEN],
             buffer_len: 0,
             mode: EidosChallengerMode::Absorbing,
             counter: 0,
@@ -70,7 +70,7 @@ impl EidosChallenger {
 
         self.buffer[self.buffer_len] = value;
         self.buffer_len += 1;
-        if self.buffer_len == RATE {
+        if self.buffer_len == BLOCK_LEN {
             self.compress_pending_buffer();
         }
     }
@@ -117,10 +117,10 @@ impl EidosChallenger {
         output
     }
 
-    fn absorb_full_block(&mut self, block: [Felt; RATE]) {
+    fn absorb_full_block(&mut self, block: [Felt; BLOCK_LEN]) {
         assert_eq!(self.buffer_len, 0, "full-block absorb requires an empty scalar buffer");
         self.enter_absorbing_mode();
-        self.cv = compress_felt_block(self.cv, block);
+        self.cv = Eidos::compress(self.cv, block);
     }
 
     fn enter_absorbing_mode(&mut self) {
@@ -130,9 +130,9 @@ impl EidosChallenger {
     }
 
     fn compress_pending_buffer(&mut self) {
-        debug_assert_eq!(self.buffer_len, RATE);
-        self.cv = compress_felt_block(self.cv, self.buffer);
-        self.buffer = [ZERO; RATE];
+        debug_assert_eq!(self.buffer_len, BLOCK_LEN);
+        self.cv = Eidos::compress(self.cv, self.buffer);
+        self.buffer = [ZERO; BLOCK_LEN];
         self.buffer_len = 0;
     }
 
@@ -141,8 +141,8 @@ impl EidosChallenger {
             EidosChallengerMode::Absorbing => {
                 let tag = transition_tag(self.buffer_len);
                 let block = self.buffer;
-                self.cv = compress_felt_block(tweak_cv(self.cv, tag), block);
-                self.buffer = [ZERO; RATE];
+                self.cv = Eidos::compress(tweak_cv(self.cv, tag), block);
+                self.buffer = [ZERO; BLOCK_LEN];
                 self.buffer_len = 0;
                 self.mode = EidosChallengerMode::Squeezing;
                 self.counter = 0;
@@ -150,10 +150,8 @@ impl EidosChallenger {
             EidosChallengerMode::Squeezing => {
                 self.counter =
                     self.counter.checked_add(1).expect("squeeze counter exhausted before absorb");
-                self.cv = compress_felt_block(
-                    tweak_cv(self.cv, SQUEEZE_TAG),
-                    counter_block(self.counter),
-                );
+                self.cv =
+                    Eidos::compress(tweak_cv(self.cv, SQUEEZE_TAG), counter_block(self.counter));
             },
         }
 
@@ -352,7 +350,7 @@ impl CanFinalizeDigest for EidosChallenger {
 }
 
 fn transition_tag(buffer_len: usize) -> Felt {
-    debug_assert!(buffer_len < RATE);
+    debug_assert!(buffer_len < BLOCK_LEN);
     Felt::new_unchecked((TRANSITION_TAG_BASE + buffer_len as u32) as u64)
 }
 
@@ -363,8 +361,8 @@ fn tweak_cv(mut cv: Word, tag: Felt) -> Word {
     cv
 }
 
-fn counter_block(counter: u32) -> [Felt; RATE] {
-    let mut block = [ZERO; RATE];
+fn counter_block(counter: u32) -> [Felt; BLOCK_LEN] {
+    let mut block = [ZERO; BLOCK_LEN];
     block[0] = Felt::from_u32(counter);
     block
 }
@@ -380,7 +378,7 @@ mod tests {
         cv: Word,
         mode: EidosChallengerMode,
         counter: u32,
-        buffer: [Felt; RATE],
+        buffer: [Felt; BLOCK_LEN],
         buffer_len: usize,
         output_word: Word,
         output_len: usize,
@@ -448,7 +446,7 @@ mod tests {
 
         let challenger = MidenEidosChallenger::new(init, relation_digest);
 
-        let expected = compress_felt_block(
+        let expected = Eidos::compress(
             init,
             [
                 relation_digest[0],
@@ -477,7 +475,7 @@ mod tests {
 
         let output = challenger.squeeze_word();
 
-        let expected = compress_felt_block(tweak_cv(init, TRANSITION_TAG), [ZERO; RATE]);
+        let expected = Eidos::compress(tweak_cv(init, TRANSITION_TAG), [ZERO; BLOCK_LEN]);
         assert_eq!(output, expected);
 
         let snapshot = snapshot(&challenger);
@@ -494,7 +492,7 @@ mod tests {
         let first = challenger.squeeze_word();
         let second = challenger.squeeze_word();
 
-        let expected = compress_felt_block(tweak_cv(first, SQUEEZE_TAG), counter_block(1));
+        let expected = Eidos::compress(tweak_cv(first, SQUEEZE_TAG), counter_block(1));
         assert_eq!(second, expected);
         assert_eq!(snapshot(&challenger).counter, 1);
     }
@@ -513,7 +511,7 @@ mod tests {
         two.observe_felt(ZERO);
         let two_output = two.squeeze_word();
 
-        let expected_one = compress_felt_block(
+        let expected_one = Eidos::compress(
             tweak_cv(init, transition_tag(1)),
             [value, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO],
         );
@@ -577,7 +575,7 @@ mod tests {
 
         let mut challenger = EidosChallenger::new(init);
         let first_output = challenger.squeeze_word();
-        let expected = compress_felt_block(
+        let expected = Eidos::compress(
             tweak_cv(first_output, transition_tag(1)),
             [value, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO],
         );
@@ -595,7 +593,7 @@ mod tests {
         let mut challenger = EidosChallenger::new(init);
 
         let first = challenger.squeeze_word();
-        let expected = compress_felt_block(tweak_cv(first, SQUEEZE_TAG), counter_block(1));
+        let expected = Eidos::compress(tweak_cv(first, SQUEEZE_TAG), counter_block(1));
 
         let mut challenger = EidosChallenger::new(init);
         let _ = challenger.sample_felt();

@@ -139,7 +139,7 @@ end
 #! Where:
 #! - BLOCK_LO is the first preserved block word (positions 0-3, on top of stack).
 #! - BLOCK_HI is the second preserved block word (positions 4-7).
-#! - CV is the chaining word / digest (positions 8-11).
+#! - CV is the current chaining word (positions 8-11).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - end_ptr is the memory pointer where the copying should end.
 #!
@@ -166,7 +166,7 @@ end
 #
 # Inputs:  [CV, write_ptr, end_ptr, needs_padding]
 # Outputs: [BLOCK_LO, BLOCK_HI, CV', write_ptr']
-proc pipe_words_to_memory_with_capacity
+proc pipe_words_to_memory_with_cv
   # Set the two block words to zero and compress all complete blocks.
   padw padw
   exec.pipe_double_words_to_memory
@@ -218,7 +218,7 @@ pub proc pipe_words_to_memory
   movup.2 exec.eidos::init_chaining_word
   # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
-  exec.pipe_words_to_memory_with_capacity
+  exec.pipe_words_to_memory_with_cv
 end
 
 #! Copies advice words to memory while computing their domain-tagged hash.
@@ -261,7 +261,7 @@ pub proc pipe_words_to_memory_in_domain
     exec.eidos::init_chaining_word_in_domain
     # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
-    exec.pipe_words_to_memory_with_capacity
+    exec.pipe_words_to_memory_with_cv
     exec.eidos::digest
     # => [DIGEST, write_ptr', ...]
   end

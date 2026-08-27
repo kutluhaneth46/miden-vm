@@ -1,37 +1,36 @@
-//! Trace generation for the deferred transcript's 32-row BlakeG compression chiplet.
+//! Trace generation for the deferred transcript's 32-row Eidos compression chiplet.
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
 use miden_air::trace::and8_lookup::{
-    AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT7, BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_LOOKUP_KIND_COUNT,
+    AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12,
     BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL,
     byte_lookup_result,
 };
 use miden_core::{
     Felt, Word,
-    deferred::{DEFERRED_CHUNKS_DOMAIN, DEFERRED_NODE_DOMAIN, DEFERRED_ROOT_DOMAIN},
+    deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN, DEFERRED_NODE_DOMAIN},
     field::{Field, PrimeCharacteristicRing, PrimeField64},
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
 
-use super::blakeg::{
-    layout::{
-        BLOCK_PERIOD as BLAKEG_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_BLAKEG_COMPRESSION_COLS,
-    },
+use super::compression::{
+    layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     trace::{
-        BlakeGByteLookup, ByteLookupRecorder, write_felt_trace_block_into_zeroed_with_lookups,
+        ByteLookupRecorder, EidosCompressionByteLookup,
+        write_felt_trace_block_into_zeroed_with_lookups,
     },
 };
 use crate::{
     relations::ProvideMult,
     transcript::eidos::{
-        COL_ABSORPTION_ID, COL_CAP_BEGIN, COL_CV_IN_BEGIN, COL_IN_MULTIPLICITY, COL_IS_ABSORB,
-        COL_IS_AND, COL_IS_CHUNKS, COL_IS_GENERIC, COL_IS_HEAD, COL_IS_OUTPUT, COL_IS_PAYLOAD,
-        COL_OUT_MULTIPLICITY, COL_REMAINING, COL_REMAINING_INV, NUM_MAIN_COLS,
-        digest::{EidosCap, EidosDigest},
+        COL_ABSORPTION_ID, COL_CHAIN_CONTEXT_BEGIN, COL_CV_IN_BEGIN, COL_IN_MULTIPLICITY,
+        COL_IS_ABSORB, COL_IS_AND, COL_IS_CHUNKS, COL_IS_GENERIC, COL_IS_HEAD, COL_IS_OUTPUT,
+        COL_IS_PAYLOAD, COL_OUT_MULTIPLICITY, COL_REMAINING, COL_REMAINING_INV, NUM_MAIN_COLS,
+        digest::{EidosChainContext, EidosDigest},
     },
 };
 
@@ -55,8 +54,8 @@ impl AbsorptionId {
 
 /// Contiguous logical input-block span occupied by one absorption.
 ///
-/// Generic tagged nodes have one additional physical BlakeG compression for `tag || 0w`; that
-/// finalizer reuses the span tail's external id and is not counted here.
+/// Generic tagged nodes have one additional physical Eidos compression for `tag || 0w`;
+/// that finalizer reuses the span tail's external id and is not counted here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AbsorptionSpan {
     start: u32,
@@ -110,20 +109,20 @@ enum AbsorptionKind {
     Generic,
 }
 
-fn absorption_kind(cap: EidosCap) -> AbsorptionKind {
-    if cap == EidosCap::and() {
+fn absorption_kind(context: EidosChainContext) -> AbsorptionKind {
+    if context == EidosChainContext::and() {
         AbsorptionKind::And
-    } else if cap == EidosCap::chunk() {
+    } else if context == EidosChainContext::chunk() {
         AbsorptionKind::Chunks
     } else {
         AbsorptionKind::Generic
     }
 }
 
-fn block_from_chunks(rate0: [Felt; 4], rate1: [Felt; 4]) -> [Felt; 8] {
+fn block_from_words(block_lo: [Felt; 4], block_hi: [Felt; 4]) -> [Felt; 8] {
     let mut block = [Felt::ZERO; 8];
-    block[..4].copy_from_slice(&rate0);
-    block[4..].copy_from_slice(&rate1);
+    block[..4].copy_from_slice(&block_lo);
+    block[4..].copy_from_slice(&block_hi);
     block
 }
 
@@ -133,7 +132,7 @@ fn initial_cv(kind: AbsorptionKind, num_payload_blocks: usize) -> Word {
     match kind {
         AbsorptionKind::And => {
             assert_eq!(num_payload_blocks, 1, "AND must contain one digest pair");
-            DEFERRED_ROOT_DOMAIN
+            DEFERRED_AND_INIT_CV
         },
         AbsorptionKind::Chunks => Eidos::init_chaining_word(
             DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32,
@@ -146,20 +145,20 @@ fn initial_cv(kind: AbsorptionKind, num_payload_blocks: usize) -> Word {
     }
 }
 
-fn tag_block(cap: EidosCap) -> [Felt; 8] {
+fn tag_block(context: EidosChainContext) -> [Felt; 8] {
     let mut block = [Felt::ZERO; 8];
-    block[..4].copy_from_slice(&cap.as_array());
+    block[..4].copy_from_slice(&context.as_array());
     block
 }
 
-fn absorb_oracle(cap: EidosCap, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
-    let kind = absorption_kind(cap);
+fn absorb_oracle(context: EidosChainContext, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
+    let kind = absorption_kind(context);
     let mut cv = initial_cv(kind, blocks.len());
-    for &(rate0, rate1) in blocks {
-        cv = Eidos::compress_block(cv, block_from_chunks(rate0, rate1));
+    for &(block_lo, block_hi) in blocks {
+        cv = Eidos::compress(cv, block_from_words(block_lo, block_hi));
     }
     if kind == AbsorptionKind::Generic {
-        cv = Eidos::compress_block(cv, tag_block(cap));
+        cv = Eidos::compress(cv, tag_block(context));
     }
     EidosDigest(cv.into_elements())
 }
@@ -169,7 +168,7 @@ fn absorb_oracle(cap: EidosCap, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDiges
 
 #[derive(Debug, Clone)]
 struct RecordedAbsorption {
-    cap: EidosCap,
+    chain_context: EidosChainContext,
     blocks: Vec<([Felt; 4], [Felt; 4])>,
     digest: EidosDigest,
     range: Range<u32>,
@@ -189,23 +188,29 @@ impl EidosRequires {
         Self::default()
     }
 
-    pub fn digest_of(cap: EidosCap, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
+    pub fn digest_of(
+        chain_context: EidosChainContext,
+        blocks: &[([Felt; 4], [Felt; 4])],
+    ) -> EidosDigest {
         assert!(!blocks.is_empty(), "absorption needs at least one block");
-        absorb_oracle(cap, blocks)
+        absorb_oracle(chain_context, blocks)
     }
 
     pub fn require_absorption(
         &mut self,
-        cap: EidosCap,
+        chain_context: EidosChainContext,
         blocks: impl IntoIterator<Item = ([Felt; 4], [Felt; 4])>,
     ) -> AbsorptionOutput {
         let blocks: Vec<_> = blocks.into_iter().collect();
         assert!(!blocks.is_empty(), "absorption needs at least one block");
-        let digest = absorb_oracle(cap, &blocks);
+        let digest = absorb_oracle(chain_context, &blocks);
 
         if let Some(&idx) = self.by_digest.get(&digest) {
             let rec = &mut self.absorptions[idx];
-            debug_assert_eq!(rec.cap, cap, "equal digest must identify the same cap");
+            debug_assert_eq!(
+                rec.chain_context, chain_context,
+                "equal digest must identify the same chain context"
+            );
             debug_assert_eq!(rec.blocks, blocks, "equal digest must identify the same payload");
             rec.in_mult += 1;
             return AbsorptionOutput {
@@ -219,7 +224,7 @@ impl EidosRequires {
         self.next_seq += n;
         let idx = self.absorptions.len();
         self.absorptions.push(RecordedAbsorption {
-            cap,
+            chain_context,
             blocks,
             digest,
             range: range.clone(),
@@ -232,11 +237,11 @@ impl EidosRequires {
 
     pub fn require_one_shot(
         &mut self,
-        cap: EidosCap,
-        rate0: [Felt; 4],
-        rate1: [Felt; 4],
+        chain_context: EidosChainContext,
+        block_lo: [Felt; 4],
+        block_hi: [Felt; 4],
     ) -> AbsorptionOutput {
-        self.require_absorption(cap, core::iter::once((rate0, rate1)))
+        self.require_absorption(chain_context, core::iter::once((block_lo, block_hi)))
     }
 
     pub fn require_digest(&mut self, digest: EidosDigest) -> Option<AbsorptionSpan> {
@@ -261,7 +266,7 @@ impl EidosRequires {
 // TRACE GENERATION
 // ================================================================================================
 
-/// The integrated PVM BlakeG trace and its fixed byte-operation lookup trace.
+/// The integrated PVM Eidos compression trace and its fixed byte-operation lookup trace.
 #[derive(Debug)]
 pub struct EidosTraceBundle {
     pub compression: RowMajorMatrix<Felt>,
@@ -279,16 +284,16 @@ struct CompressionCycle {
     kind: AbsorptionKind,
     remaining: usize,
     block: [Felt; 8],
-    cap: EidosCap,
+    chain_context: EidosChainContext,
     cv_in: Word,
 }
 
 impl CompressionCycle {
     fn append_metadata(&self, row: &mut Vec<Felt>) {
         let start = row.len();
-        row.resize(start + (NUM_MAIN_COLS - NUM_BLAKEG_COMPRESSION_COLS), Felt::ZERO);
+        row.resize(start + (NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS), Felt::ZERO);
         let meta = &mut row[start..];
-        let col = |absolute: usize| absolute - NUM_BLAKEG_COMPRESSION_COLS;
+        let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
         meta[col(COL_ABSORPTION_ID)] = Felt::from(self.absorption_id);
         meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
         meta[col(COL_OUT_MULTIPLICITY)] = Felt::from(self.out_mult);
@@ -308,21 +313,26 @@ impl CompressionCycle {
         } else {
             (remaining - Felt::ONE).inverse()
         };
-        meta[col(COL_CAP_BEGIN)..col(COL_CAP_BEGIN) + 4].copy_from_slice(&self.cap.as_array());
+        meta[col(COL_CHAIN_CONTEXT_BEGIN)..col(COL_CHAIN_CONTEXT_BEGIN) + 4]
+            .copy_from_slice(&self.chain_context.as_array());
         meta[col(COL_CV_IN_BEGIN)..col(COL_CV_IN_BEGIN) + 4].copy_from_slice(self.cv_in.as_slice());
     }
 }
 
-struct BlakeGLookupCounter<'a> {
+struct EidosCompressionLookupCounter<'a> {
     counts: &'a mut [u64],
 }
 
-impl ByteLookupRecorder for BlakeGLookupCounter<'_> {
-    fn record(&mut self, lookup: BlakeGByteLookup, lhs: u8, rhs: u8, result: u32) {
+impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
+    fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
         let kind = match lookup {
-            BlakeGByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            BlakeGByteLookup::Rot12 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT12[byte],
-            BlakeGByteLookup::Rot7 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT7[byte],
+            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
+            EidosCompressionByteLookup::Rot12 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
+            },
+            EidosCompressionByteLookup::Rot7 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
+            },
         };
         debug_assert_eq!(byte_lookup_result(kind, lhs, rhs), result);
         let pair = ((lhs as usize) << 8) + rhs as usize;
@@ -331,7 +341,11 @@ impl ByteLookupRecorder for BlakeGLookupCounter<'_> {
 }
 
 fn unpack_felts<const N: usize>(values: &[Felt]) -> [u32; N] {
-    assert_eq!(2 * values.len(), N, "packed Felt slice must contain exactly {N} BlakeG words",);
+    assert_eq!(
+        2 * values.len(),
+        N,
+        "packed Felt slice must contain exactly {N} EidosCompression words",
+    );
 
     let mut words = [0; N];
     for (idx, value) in values.iter().enumerate() {
@@ -366,21 +380,21 @@ fn build_and8_trace(counts: &[u64]) -> RowMajorMatrix<Felt> {
     RowMajorMatrix::new(values, NUM_AND8_LOOKUP_COLS)
 }
 
-fn build_blakeg_traces(
+fn build_eidos_compression_traces(
     cycles: &[CompressionCycle],
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let real_cycles = cycles.len();
-    let height = (real_cycles * BLAKEG_COMPRESSION_CYCLE_LEN)
+    let height = (real_cycles * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
-        .max(BLAKEG_COMPRESSION_CYCLE_LEN);
-    let cycle_count = height / BLAKEG_COMPRESSION_CYCLE_LEN;
-    let mut values = vec![Felt::ZERO; height * NUM_BLAKEG_COMPRESSION_COLS];
-    let (rows, remainder) = values.as_chunks_mut::<NUM_BLAKEG_COMPRESSION_COLS>();
+        .max(EIDOS_COMPRESSION_CYCLE_LEN);
+    let cycle_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
+    let mut values = vec![Felt::ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
+    let (rows, remainder) = values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>();
     debug_assert!(remainder.is_empty());
     let mut counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
 
     for (physical_cycle_id, cycle_rows) in
-        rows.chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN).enumerate()
+        rows.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
     {
         let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
             let block = unpack_felts::<16>(&cycle.block);
@@ -391,7 +405,7 @@ fn build_blakeg_traces(
         };
 
         record_message_range_checks(&mut counts, block);
-        let mut recorder = BlakeGLookupCounter { counts: &mut counts };
+        let mut recorder = EidosCompressionLookupCounter { counts: &mut counts };
         write_felt_trace_block_into_zeroed_with_lookups(
             cycle_rows,
             block,
@@ -401,9 +415,9 @@ fn build_blakeg_traces(
         );
     }
 
-    debug_assert_eq!(cycle_count, rows.len() / BLAKEG_COMPRESSION_CYCLE_LEN);
+    debug_assert_eq!(cycle_count, rows.len() / EIDOS_COMPRESSION_CYCLE_LEN);
     (
-        RowMajorMatrix::new(values, NUM_BLAKEG_COMPRESSION_COLS),
+        RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS),
         build_and8_trace(&counts),
     )
 }
@@ -413,20 +427,21 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         .absorptions
         .iter()
         .map(|rec| {
-            rec.blocks.len() + usize::from(absorption_kind(rec.cap) == AbsorptionKind::Generic)
+            rec.blocks.len()
+                + usize::from(absorption_kind(rec.chain_context) == AbsorptionKind::Generic)
         })
         .sum();
     let mut cycles = Vec::with_capacity(physical_cycles);
 
     for rec in &requires.absorptions {
-        let kind = absorption_kind(rec.cap);
+        let kind = absorption_kind(rec.chain_context);
         let extra = usize::from(kind == AbsorptionKind::Generic);
         let total = rec.blocks.len() + extra;
         let mut cv = initial_cv(kind, rec.blocks.len());
 
-        for (idx, &(rate0, rate1)) in rec.blocks.iter().enumerate() {
-            let block = block_from_chunks(rate0, rate1);
-            let cv_out = Eidos::compress_block(cv, block);
+        for (idx, &(block_lo, block_hi)) in rec.blocks.iter().enumerate() {
+            let block = block_from_words(block_lo, block_hi);
+            let cv_out = Eidos::compress(cv, block);
             let is_output = kind != AbsorptionKind::Generic && idx + 1 == rec.blocks.len();
             cycles.push(CompressionCycle {
                 absorption_id: rec.range.start + idx as u32,
@@ -438,15 +453,15 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
                 kind,
                 remaining: total - idx,
                 block,
-                cap: rec.cap,
+                chain_context: rec.chain_context,
                 cv_in: cv,
             });
             cv = cv_out;
         }
 
         if kind == AbsorptionKind::Generic {
-            let block = tag_block(rec.cap);
-            let cv_out = Eidos::compress_block(cv, block);
+            let block = tag_block(rec.chain_context);
+            let cv_out = Eidos::compress(cv, block);
             cycles.push(CompressionCycle {
                 absorption_id: rec.range.end - 1,
                 in_mult: 0,
@@ -457,7 +472,7 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
                 kind,
                 remaining: 1,
                 block,
-                cap: rec.cap,
+                chain_context: rec.chain_context,
                 cv_in: cv,
             });
             cv = cv_out;
@@ -466,19 +481,21 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         debug_assert_eq!(EidosDigest(cv.into_elements()), rec.digest);
     }
 
-    let (blakeg, and8) = build_blakeg_traces(&cycles);
-    let height = blakeg.values.len() / blakeg.width;
-    debug_assert_eq!(height % BLAKEG_COMPRESSION_CYCLE_LEN, 0);
-    debug_assert!(cycles.len() * BLAKEG_COMPRESSION_CYCLE_LEN <= height);
+    let (eidos_compression, and8) = build_eidos_compression_traces(&cycles);
+    let height = eidos_compression.values.len() / eidos_compression.width;
+    debug_assert_eq!(height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
+    debug_assert!(cycles.len() * EIDOS_COMPRESSION_CYCLE_LEN <= height);
 
     let mut values = Vec::with_capacity(height * NUM_MAIN_COLS);
-    for (row_idx, base_row) in blakeg.values.chunks_exact(blakeg.width).enumerate() {
+    for (row_idx, base_row) in
+        eidos_compression.values.chunks_exact(eidos_compression.width).enumerate()
+    {
         values.extend_from_slice(base_row);
-        let cycle_idx = row_idx / BLAKEG_COMPRESSION_CYCLE_LEN;
+        let cycle_idx = row_idx / EIDOS_COMPRESSION_CYCLE_LEN;
         if let Some(cycle) = cycles.get(cycle_idx) {
             cycle.append_metadata(&mut values);
         } else {
-            values.extend([Felt::ZERO; NUM_MAIN_COLS - NUM_BLAKEG_COMPRESSION_COLS]);
+            values.extend([Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS]);
         }
     }
 
@@ -492,4 +509,4 @@ pub fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
     generate_traces(requires).compression
 }
 
-const _: () = assert!(BLAKEG_COMPRESSION_CYCLE_LEN == 32);
+const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);

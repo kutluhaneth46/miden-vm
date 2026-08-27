@@ -7,8 +7,8 @@
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
 //!
-//! BlakeG compression constraints are enforced by the separate
-//! [`crate::BlakeGCompressionAir`], with byte-table relations supplied by
+//! Eidos compression constraints are enforced by the separate
+//! [`crate::EidosCompressionAir`], with byte-table relations supplied by
 //! [`crate::And8LookupAir`].
 //!
 //! Chiplet LogUp lookup-argument constraints are emitted by

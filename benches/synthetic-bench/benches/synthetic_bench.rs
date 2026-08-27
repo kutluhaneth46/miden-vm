@@ -181,8 +181,13 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3}",
-            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.chiplets, cost.memory,
+            "    {:<18} core={:7.3} eidos_compression={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3}",
+            snippet.name,
+            cost.core,
+            cost.eidos_compression,
+            cost.bitwise,
+            cost.chiplets,
+            cost.memory,
         );
     }
 
@@ -242,10 +247,10 @@ fn bench_one_scenario(
         );
     }
     println!(
-        "    trace:   core={} chiplets={} blakeg={} and8={} (padded_total={})",
+        "    trace:   core={} chiplets={} eidos_compression={} and8={} (padded_total={})",
         snapshot.trace.core_rows,
         snapshot.trace.chiplets_rows,
-        snapshot.trace.blakeg_compression_rows,
+        snapshot.trace.eidos_compression_rows,
         snapshot.trace.byte_pair_lookup_rows,
         snapshot.trace.padded_total(),
     );

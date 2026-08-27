@@ -33,12 +33,12 @@ fn read_memory(output: &ExecutionOutput, addr: u32) -> u64 {
 fn execute_load_air_context(
     core_log_height: u64,
     chiplets_log_height: u64,
-    blakeg_log_height: u64,
+    eidos_compression_log_height: u64,
 ) -> ExecutionOutput {
     let (output, _) = build_test!(
         load_air_context_source(),
         &[],
-        &[core_log_height, chiplets_log_height, blakeg_log_height],
+        &[core_log_height, chiplets_log_height, eidos_compression_log_height],
     )
     .execute_for_output()
     .expect("load_air_context should execute");
@@ -90,13 +90,13 @@ fn load_air_context_chiplets_trace_length_lower_bound() {
 }
 
 #[test]
-fn load_air_context_blakeg_trace_length_upper_bound() {
+fn load_air_context_eidos_compression_trace_length_upper_bound() {
     let test = build_test!(load_air_context_source(), &[], &[10, 10, 30]);
     expect_assert_error_message!(test);
 }
 
 #[test]
-fn load_air_context_blakeg_trace_length_lower_bound() {
+fn load_air_context_eidos_compression_trace_length_lower_bound() {
     let test = build_test!(load_air_context_source(), &[], &[10, 10, 5]);
     expect_assert_error_message!(test);
 }
@@ -119,27 +119,27 @@ fn load_air_context_stores_shape_and_max_height() {
 #[test]
 fn load_air_context_derives_proof_order_tags() {
     let cases = [
-        ((8, 9, 10), 0),  // Core, Chiplets, BlakeG, And8
-        ((8, 10, 9), 2),  // Core, BlakeG, Chiplets, And8
-        ((9, 8, 10), 6),  // Chiplets, Core, BlakeG, And8
-        ((10, 8, 9), 8),  // Chiplets, BlakeG, Core, And8
-        ((9, 10, 8), 12), // BlakeG, Core, Chiplets, And8
-        ((10, 9, 8), 14), // BlakeG, Chiplets, Core, And8
+        ((8, 9, 10), 0),  // Core, Chiplets, EidosCompression, And8
+        ((8, 10, 9), 2),  // Core, EidosCompression, Chiplets, And8
+        ((9, 8, 10), 6),  // Chiplets, Core, EidosCompression, And8
+        ((10, 8, 9), 8),  // Chiplets, EidosCompression, Core, And8
+        ((9, 10, 8), 12), // EidosCompression, Core, Chiplets, And8
+        ((10, 9, 8), 14), // EidosCompression, Chiplets, Core, And8
         ((8, 8, 8), 0),   // ties use instance order
         ((8, 8, 9), 0),   // partial tie: Core before Chiplets
-        ((8, 9, 8), 2),   // partial tie: Core before BlakeG
-        ((9, 8, 8), 8),   // partial tie: Chiplets before BlakeG
-        ((9, 9, 8), 12),  // partial tie: Core before Chiplets after BlakeG
-        ((9, 8, 9), 6),   // partial tie: Core before BlakeG after Chiplets
-        ((8, 9, 9), 0),   // partial tie: Chiplets before BlakeG
+        ((8, 9, 8), 2),   // partial tie: Core before EidosCompression
+        ((9, 8, 8), 8),   // partial tie: Chiplets before EidosCompression
+        ((9, 9, 8), 12),  // partial tie: Core before Chiplets after EidosCompression
+        ((9, 8, 9), 6),   // partial tie: Core before EidosCompression after Chiplets
+        ((8, 9, 9), 0),   // partial tie: Chiplets before EidosCompression
     ];
 
-    for ((core, chiplets, blakeg), expected_tag) in cases {
-        let output = execute_load_air_context(core, chiplets, blakeg);
+    for ((core, chiplets, eidos_compression), expected_tag) in cases {
+        let output = execute_load_air_context(core, chiplets, eidos_compression);
         assert_eq!(
             read_memory(&output, ORDER_TAG_PTR),
             expected_tag,
-            "unexpected proof-order tag for (core={core}, chiplets={chiplets}, blakeg={blakeg})",
+            "unexpected proof-order tag for (core={core}, chiplets={chiplets}, eidos_compression={eidos_compression})",
         );
     }
 }
@@ -835,7 +835,7 @@ fn relation_height_setters_write_the_generic_array_in_order() {
      begin
          push.11 exec.layout::set_core_trace_length_log
          push.22 exec.layout::set_chiplets_trace_length_log
-         push.33 exec.layout::set_blakeg_compression_trace_length_log
+         push.33 exec.layout::set_eidos_compression_trace_length_log
          push.44 exec.layout::set_and8_lookup_trace_length_log
      end";
     let (output, _) =
@@ -845,7 +845,7 @@ fn relation_height_setters_write_the_generic_array_in_order() {
     assert_eq!(
         read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 2),
         33,
-        "BlakeG compression at offset 2"
+        "Eidos compression at offset 2"
     );
     assert_eq!(
         read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 3),

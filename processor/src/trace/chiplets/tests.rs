@@ -37,16 +37,16 @@ fn hasher_trace_len(controller_rows: usize) -> usize {
 #[test]
 fn hasher_chiplet_trace() {
     // --- single hasher compression with no stack manipulation ---
-    // The program is a single basic block containing BCompress.
+    // The program is a single basic block containing Compress.
     // This produces:
     //   - 1 span hash controller row
-    //   - 1 BCOMPRESS controller row
+    //   - 1 COMPRESS controller row
     // Total: 2 controller rows padded to the chiplet alignment boundary.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
-    let operations = vec![Operation::BCompress];
+    let operations = vec![Operation::Compress];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, KernelDescriptor::default());
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + BCompress
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + Compress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -90,10 +90,10 @@ fn memory_chiplet_trace() {
 #[test]
 fn stacked_chiplet_trace() {
     // --- operations in hasher, bitwise, and memory processors ---
-    // Operations: U32xor, Push(0), MStoreW, BCompress
+    // Operations: U32xor, Push(0), MStoreW, Compress
     // This produces:
     //   - 1 span hash controller row for the basic block
-    //   - 1 BCOMPRESS controller row
+    //   - 1 COMPRESS controller row
     // Total hasher: 2 controller rows padded to the chiplet alignment boundary.
     // Then: 1 bitwise row (U32xor), then 1 memory row (MStoreW)
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
@@ -101,12 +101,12 @@ fn stacked_chiplet_trace() {
         Operation::U32xor,
         Operation::Push(ZERO),
         Operation::MStoreW,
-        Operation::BCompress,
+        Operation::Compress,
     ];
     let kernel = build_kernel();
     let (chiplets_trace, _trace_len) = build_trace(&stack, ops, kernel);
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + BCompress
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + Compress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 

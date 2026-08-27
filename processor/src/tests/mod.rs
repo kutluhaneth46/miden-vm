@@ -581,8 +581,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
 
     let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
     let err = build_test.execute().expect_err("expected error");
-    // With LE sponge, the root hash changes and lookup fails at root level instead of path
-    // verification
+    // The deliberately wrong index changes the derived root key, so the Merkle-store lookup fails.
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",

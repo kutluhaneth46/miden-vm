@@ -161,8 +161,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
     },
     PrimitiveSpec {
-        spelling: "adv.insert_bcompress",
-        build: || Instruction::SysEvent(SystemEventNode::InsertBCompress),
+        spelling: "adv.insert_compress",
+        build: || Instruction::SysEvent(SystemEventNode::InsertCompress),
     },
     PrimitiveSpec {
         spelling: "adv.insert_hqword",
@@ -409,8 +409,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Ext2Sub,
     },
     PrimitiveSpec {
-        spelling: "bcompress",
-        build: || Instruction::BCompress,
+        spelling: "compress",
+        build: || Instruction::Compress,
     },
     PrimitiveSpec {
         spelling: "fri_ext2fold4",

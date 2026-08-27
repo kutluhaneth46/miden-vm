@@ -32,9 +32,9 @@ use miden_air::{
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
-        blakeg_compression::{
-            BLAKEG_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
-            NUM_BLAKEG_COMPRESSION_COLS,
+        eidos_compression::{
+            EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
+            NUM_EIDOS_COMPRESSION_COLS,
         },
     },
 };
@@ -48,11 +48,11 @@ use miden_core::{
 use super::{Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs, rand_array};
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
-const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;
-const BLAKEG_NARROW_LOOKUP_COLUMNS: usize = 18;
-const BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
-const BLAKEG_LOOKUP_COLUMNS: usize =
-    BLAKEG_NARROW_LOOKUP_COLUMNS + BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE.len();
+const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;
+const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
+const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
+const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
+    EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
@@ -214,26 +214,26 @@ fn lookup_global_balance_closes_for_tiny_span() {
 }
 
 #[test]
-fn lookup_global_balance_closes_for_bcompress() {
-    let trace = build_trace_from_ops(vec![Operation::BCompress], &[1, 2, 3, 4, 5, 6, 7, 8]);
+fn lookup_global_balance_closes_for_compress() {
+    let trace = build_trace_from_ops(vec![Operation::Compress], &[1, 2, 3, 4, 5, 6, 7, 8]);
     assert_global_lookup_balance(&trace);
 }
 
 #[test]
-fn deduplicated_bcompress_keeps_unit_controller_multiplicity() {
+fn deduplicated_compress_keeps_unit_controller_multiplicity() {
     // The fourth word backs up the input CV. After the first compression, swap that backup into
-    // the CV position so the second BCOMPRESS issues the identical physical request.
+    // the CV position so the second COMPRESS issues the identical physical request.
     let trace = build_trace_from_ops(
         vec![
-            Operation::BCompress,
+            Operation::Compress,
             Operation::SwapW2,
             Operation::SwapW3,
             Operation::SwapW2,
-            Operation::BCompress,
+            Operation::Compress,
         ],
         &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 10, 11, 12],
     );
-    let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
     let (_, kernel_felts) = aux_inputs.split_at(2 * WORD_SIZE);
@@ -253,10 +253,10 @@ fn deduplicated_bcompress_keeps_unit_controller_multiplicity() {
         &[kernel_felts],
         &challenges,
     );
-    let blakeg_report = miden_air::lookup::debug::check_trace_balance(
-        &MidenAir::BLAKEG_COMPRESSION,
-        &blakeg_matrix,
-        &BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION),
+    let eidos_compression_report = miden_air::lookup::debug::check_trace_balance(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
+        &BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION),
         &public_values,
         &[],
         &challenges,
@@ -279,13 +279,13 @@ fn deduplicated_bcompress_keeps_unit_controller_multiplicity() {
                 "two identical controller requests were not emitted separately with unit multiplicity:\n{chip_report}"
             )
         });
-    let provider = blakeg_report
+    let provider = eidos_compression_report
         .unmatched
         .iter()
         .find(|entry| entry.denom == controller.denom)
         .unwrap_or_else(|| {
             panic!(
-                "deduplicated BlakeG provider did not emit the controller denominator:\n{blakeg_report}"
+                "deduplicated EidosCompression provider did not emit the controller denominator:\n{eidos_compression_report}"
             )
         });
     assert_eq!(provider.net_multiplicity, -two);
@@ -322,16 +322,16 @@ fn lookup_global_balance_closes_for_fibonacci_span() {
 }
 
 #[test]
-fn blakeg_lookup_row_shape_matches_expected_interactions() {
-    const BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK: u64 = 964;
+fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
+    const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, blakeg_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
+    let (_, _, eidos_compression_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
 
     assert_eq!(
-        blakeg_matrix.height() % BLAKEG_COMPRESSION_CYCLE_LEN,
+        eidos_compression_matrix.height() % EIDOS_COMPRESSION_CYCLE_LEN,
         0,
-        "BlakeG trace height must be a whole number of compression blocks",
+        "Eidos compression trace height must be a whole number of compression blocks",
     );
 
     let raw = rand_array::<Felt, 4>();
@@ -339,52 +339,55 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
-    let blakeg_fractions = build_lookup_fractions(
-        &MidenAir::BLAKEG_COMPRESSION,
-        &blakeg_matrix,
+    let eidos_compression_periodic =
+        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+    let eidos_compression_fractions = build_lookup_fractions(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
         None,
-        &blakeg_periodic,
+        &eidos_compression_periodic,
         &challenges,
     );
 
-    assert_eq!(blakeg_fractions.num_rows(), blakeg_matrix.height());
-    assert_blakeg_compression_column_shape("row-shape test", &blakeg_fractions);
+    assert_eq!(eidos_compression_fractions.num_rows(), eidos_compression_matrix.height());
+    assert_eidos_compression_column_shape("row-shape test", &eidos_compression_fractions);
 
-    for (row, column_counts) in
-        blakeg_fractions.counts().chunks(blakeg_fractions.num_columns()).enumerate()
+    for (row, column_counts) in eidos_compression_fractions
+        .counts()
+        .chunks(eidos_compression_fractions.num_columns())
+        .enumerate()
     {
-        let cycle_row = row % BLAKEG_COMPRESSION_CYCLE_LEN;
+        let cycle_row = row % EIDOS_COMPRESSION_CYCLE_LEN;
         let actual: usize = column_counts.iter().sum();
-        let row_start = row * NUM_BLAKEG_COMPRESSION_COLS;
-        let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
+        let row_start = row * NUM_EIDOS_COMPRESSION_COLS;
+        let is_aead = eidos_compression_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
         let compression_multiplicity =
-            blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
-        let expected = expected_blakeg_compression_fraction_entry_range_at_cycle_row(
+            eidos_compression_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
+        let expected = expected_eidos_compression_fraction_entry_range_at_cycle_row(
             cycle_row,
             is_aead,
             compression_multiplicity,
         );
         assert!(
             expected.contains(&actual),
-            "BlakeG lookup count mismatch at row {row} cycle row {cycle_row}",
+            "EidosCompression lookup count mismatch at row {row} cycle row {cycle_row}",
         );
     }
 
-    let block_count = blakeg_matrix.height() / BLAKEG_COMPRESSION_CYCLE_LEN;
-    let expected_blakeg_byte_lookup_total =
-        block_count as u64 * BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK;
-    let mut actual_blakeg_byte_lookup_total = 0;
+    let block_count = eidos_compression_matrix.height() / EIDOS_COMPRESSION_CYCLE_LEN;
+    let expected_eidos_compression_byte_lookup_total =
+        block_count as u64 * BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK;
+    let mut actual_eidos_compression_byte_lookup_total = 0;
     for row in 0..AND8_TABLE_ROWS {
         let row_start = row * NUM_AND8_LOOKUP_COLS;
         for col in 0..BYTE_LOOKUP_KIND_COUNT {
-            actual_blakeg_byte_lookup_total +=
+            actual_eidos_compression_byte_lookup_total +=
                 and8_matrix.values[row_start + col].as_canonical_u64();
         }
     }
     assert_eq!(
-        actual_blakeg_byte_lookup_total, expected_blakeg_byte_lookup_total,
-        "BlakeG byte-lookup multiplicities do not match BlakeG requests",
+        actual_eidos_compression_byte_lookup_total, expected_eidos_compression_byte_lookup_total,
+        "EidosCompression byte-lookup multiplicities do not match EidosCompression requests",
     );
 
     let padding_start = AND8_TABLE_ROWS * NUM_AND8_LOOKUP_COLS;
@@ -396,24 +399,24 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     );
 }
 
-fn expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
+fn expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         0..=27 => 36,
         28..=31 => 29,
-        _ => unreachable!("cycle row must be in 0..{BLAKEG_COMPRESSION_CYCLE_LEN}"),
+        _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
 
-fn expected_blakeg_compression_footer_interactions_at_cycle_row(cycle_row: usize) -> usize {
+fn expected_eidos_compression_footer_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         0 => 1,
         31 => 2,
         1..=30 => 0,
-        _ => unreachable!("cycle row must be in 0..{BLAKEG_COMPRESSION_CYCLE_LEN}"),
+        _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
 
-fn expected_blakeg_compression_fraction_entry_range_at_cycle_row(
+fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
     cycle_row: usize,
     is_aead: bool,
     compression_multiplicity: Felt,
@@ -421,60 +424,62 @@ fn expected_blakeg_compression_fraction_entry_range_at_cycle_row(
     match cycle_row {
         0 => 37..=37,
         28..=31 if is_aead => {
-            let expected = expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row)
+            let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row)
                 + if cycle_row == 31 { 4 } else { 2 };
             expected..=expected
         },
         31 if compression_multiplicity != Felt::ZERO => 31..=31,
         31 => 30..=30,
         _ => {
-            let expected = expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row);
+            let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
         },
     }
 }
 
 #[test]
-fn blakeg_lookup_ledger_fits_narrow_slot_cap() {
+fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
     const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1127;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, blakeg_matrix, _) = trace.main_trace().to_air_matrices();
+    let (_, _, eidos_compression_matrix, _) = trace.main_trace().to_air_matrices();
     let raw = rand_array::<Felt, 4>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
-    let blakeg_fractions = build_lookup_fractions(
-        &MidenAir::BLAKEG_COMPRESSION,
-        &blakeg_matrix,
+    let eidos_compression_periodic =
+        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+    let eidos_compression_fractions = build_lookup_fractions(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
         None,
-        &blakeg_periodic,
+        &eidos_compression_periodic,
         &challenges,
     );
     let (narrow_batch_columns, _) =
-        assert_blakeg_compression_column_shape("lookup ledger", &blakeg_fractions);
+        assert_eidos_compression_column_shape("lookup ledger", &eidos_compression_fractions);
     let narrow_slot_cap = narrow_batch_columns * SLOTS_PER_BATCH_COLUMN;
-    let row_lookup_cap = narrow_slot_cap + BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE.iter().sum::<usize>();
+    let row_lookup_cap =
+        narrow_slot_cap + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.iter().sum::<usize>();
 
     let mut total = 0;
-    for cycle_row in 0..BLAKEG_COMPRESSION_CYCLE_LEN {
+    for cycle_row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
         let narrow_pressure =
-            expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row);
+            expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row);
         assert!(
             narrow_pressure <= narrow_slot_cap,
             "cycle row {cycle_row} has narrow lookup pressure {narrow_pressure}, above cap \
              {narrow_slot_cap}",
         );
         total += narrow_pressure
-            + expected_blakeg_compression_footer_interactions_at_cycle_row(cycle_row);
+            + expected_eidos_compression_footer_interactions_at_cycle_row(cycle_row);
     }
 
     assert_eq!(total, COMPRESSION_DENOMINATORS_PER_BLOCK);
     assert!(
-        total <= BLAKEG_COMPRESSION_CYCLE_LEN * row_lookup_cap,
+        total <= EIDOS_COMPRESSION_CYCLE_LEN * row_lookup_cap,
         "lookup ledger must fit the fixed per-row lookup-column capacity",
     );
 }
@@ -482,7 +487,7 @@ fn blakeg_lookup_ledger_fits_narrow_slot_cap() {
 #[test]
 fn lookup_balance_rejects_tampered_aead_output_pair_lane() {
     let trace = aead_stream_trace();
-    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
 
     let first_stream_row = aead_stream_rows(&chip_matrix)
@@ -501,16 +506,16 @@ fn lookup_balance_rejects_tampered_aead_output_pair_lane() {
         &trace,
         &core_matrix,
         &chip_matrix,
-        &blakeg_matrix,
+        &eidos_compression_matrix,
         &and8_matrix,
-        "AeadBlakeGOutputPairMsg",
+        "AeadEidosCompressionOutputPairMsg",
     );
 }
 
 #[test]
 fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
     let trace = aead_stream_trace();
-    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
 
     let stream_rows = aead_stream_rows(&chip_matrix);
@@ -528,7 +533,7 @@ fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
         &trace,
         &core_matrix,
         &chip_matrix,
-        &blakeg_matrix,
+        &eidos_compression_matrix,
         &and8_matrix,
         "AeadStreamRequestMsg",
     );
@@ -537,7 +542,7 @@ fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
 #[test]
 fn lookup_balance_rejects_tampered_merkle_start_flag() {
     let trace = mpverify_trace();
-    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
 
     let first_merkle_start = merkle_start_rows(&chip_matrix)
@@ -551,73 +556,81 @@ fn lookup_balance_rejects_tampered_merkle_start_flag() {
         &trace,
         &core_matrix,
         &chip_matrix,
-        &blakeg_matrix,
+        &eidos_compression_matrix,
         &and8_matrix,
         "HasherMerkleVerifyInit",
     );
 }
 
-fn assert_blakeg_compression_column_shape(
+fn assert_eidos_compression_column_shape(
     label: &str,
     fractions: &LookupFractions<Felt, QuadFelt>,
 ) -> (usize, usize) {
     let shape = fractions.shape();
 
-    assert_eq!(shape.len(), BLAKEG_LOOKUP_COLUMNS, "{label}: BlakeG lookup aux width drifted",);
+    assert_eq!(
+        shape.len(),
+        EIDOS_COMPRESSION_LOOKUP_COLUMNS,
+        "{label}: EidosCompression lookup aux width drifted",
+    );
 
     for (col, &count) in shape.iter().enumerate() {
-        let expected = if col < BLAKEG_NARROW_LOOKUP_COLUMNS {
-            BLAKEG_NARROW_COLUMN_CAPACITY
+        let expected = if col < EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS {
+            EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY
         } else {
-            BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE[col - BLAKEG_NARROW_LOOKUP_COLUMNS]
+            EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE
+                [col - EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS]
         };
         assert_eq!(
             count, expected,
-            "{label}: BlakeG lookup column {col} has shape {count}, expected {expected}",
+            "{label}: EidosCompression lookup column {col} has shape {count}, expected {expected}",
         );
     }
 
     assert_eq!(
         fractions.num_columns(),
-        BLAKEG_LOOKUP_COLUMNS,
-        "{label}: BlakeG lookup aux width drifted",
+        EIDOS_COMPRESSION_LOOKUP_COLUMNS,
+        "{label}: EidosCompression lookup aux width drifted",
     );
 
-    (BLAKEG_NARROW_LOOKUP_COLUMNS, BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE.len())
+    (
+        EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS,
+        EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len(),
+    )
 }
 
-fn assert_blakeg_compression_oracle_coverage(
+fn assert_eidos_compression_oracle_coverage(
     label: &str,
-    blakeg_matrix: &RowMajorMatrix<Felt>,
+    eidos_compression_matrix: &RowMajorMatrix<Felt>,
     fractions: &LookupFractions<Felt, QuadFelt>,
 ) {
     assert_eq!(
-        fractions.num_rows() % BLAKEG_COMPRESSION_CYCLE_LEN,
+        fractions.num_rows() % EIDOS_COMPRESSION_CYCLE_LEN,
         0,
-        "{label}: BlakeG trace height must be a whole number of compression blocks",
+        "{label}: Eidos compression trace height must be a whole number of compression blocks",
     );
 
     let (narrow_batch_columns, footer_columns) =
-        assert_blakeg_compression_column_shape(label, fractions);
+        assert_eidos_compression_column_shape(label, fractions);
 
-    let mut seen_cycle_rows = [false; BLAKEG_COMPRESSION_CYCLE_LEN];
+    let mut seen_cycle_rows = [false; EIDOS_COMPRESSION_CYCLE_LEN];
     let mut saw_narrow_only_row = false;
     let mut saw_full_narrow_pair = false;
     let mut saw_footer_fraction = false;
     for (row, column_counts) in fractions.counts().chunks(fractions.num_columns()).enumerate() {
-        let cycle_row = row % BLAKEG_COMPRESSION_CYCLE_LEN;
+        let cycle_row = row % EIDOS_COMPRESSION_CYCLE_LEN;
         seen_cycle_rows[cycle_row] = true;
 
         for (col, &count) in column_counts[..narrow_batch_columns].iter().enumerate() {
             assert!(
-                count <= BLAKEG_NARROW_COLUMN_CAPACITY,
+                count <= EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY,
                 "{label}: row {row} cycle row {cycle_row} narrow column {col} pushed {count} \
                  fractions, above batch-2 capacity",
             );
             saw_full_narrow_pair |= count == 2;
         }
         for (offset, &count) in column_counts[narrow_batch_columns..].iter().enumerate() {
-            let capacity = BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE[offset];
+            let capacity = EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE[offset];
             assert!(
                 count <= capacity,
                 "{label}: row {row} cycle row {cycle_row} footer column {} pushed {count} \
@@ -631,26 +644,26 @@ fn assert_blakeg_compression_oracle_coverage(
         saw_narrow_only_row |= overlay_total == 0;
 
         let actual: usize = column_counts.iter().sum();
-        let row_start = row * blakeg_matrix.width();
-        let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
+        let row_start = row * eidos_compression_matrix.width();
+        let is_aead = eidos_compression_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
         let compression_multiplicity =
-            blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
-        let expected = expected_blakeg_compression_fraction_entry_range_at_cycle_row(
+            eidos_compression_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
+        let expected = expected_eidos_compression_fraction_entry_range_at_cycle_row(
             cycle_row,
             is_aead,
             compression_multiplicity,
         );
         assert!(
             expected.contains(&actual),
-            "{label}: BlakeG lookup count mismatch at row {row} cycle row {cycle_row}",
+            "{label}: EidosCompression lookup count mismatch at row {row} cycle row {cycle_row}",
         );
     }
 
     assert!(
         seen_cycle_rows.into_iter().all(|seen| seen),
-        "{label}: oracle trace must exercise every BlakeG cycle row",
+        "{label}: oracle trace must exercise every Eidos compression cycle row",
     );
-    assert_eq!(footer_columns, BLAKEG_FOOTER_LOOKUP_COLUMN_SHAPE.len());
+    assert_eq!(footer_columns, EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len());
     assert!(saw_narrow_only_row, "{label}: oracle trace must exercise narrow lookup rows");
     assert!(
         saw_full_narrow_pair && saw_footer_fraction,
@@ -659,10 +672,15 @@ fn assert_blakeg_compression_oracle_coverage(
 }
 
 fn assert_global_lookup_balance(trace: &VmTrace) {
-    let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
-    let residuals =
-        global_lookup_residuals(trace, &core_matrix, &chip_matrix, &blakeg_matrix, &and8_matrix);
+    let residuals = global_lookup_residuals(
+        trace,
+        &core_matrix,
+        &chip_matrix,
+        &eidos_compression_matrix,
+        &and8_matrix,
+    );
 
     assert!(
         residuals.is_empty(),
@@ -676,12 +694,17 @@ fn assert_global_lookup_balance_rejects(
     trace: &VmTrace,
     core_matrix: &RowMajorMatrix<Felt>,
     chip_matrix: &RowMajorMatrix<Felt>,
-    blakeg_matrix: &RowMajorMatrix<Felt>,
+    eidos_compression_matrix: &RowMajorMatrix<Felt>,
     and8_matrix: &RowMajorMatrix<Felt>,
     expected_msg: &str,
 ) {
-    let residuals =
-        global_lookup_residuals(trace, core_matrix, chip_matrix, blakeg_matrix, and8_matrix);
+    let residuals = global_lookup_residuals(
+        trace,
+        core_matrix,
+        chip_matrix,
+        eidos_compression_matrix,
+        and8_matrix,
+    );
     assert!(!residuals.is_empty(), "{label}: tampered trace unexpectedly balanced");
 
     let found_expected_msg = residuals
@@ -698,7 +721,7 @@ fn global_lookup_residuals(
     trace: &VmTrace,
     core_matrix: &RowMajorMatrix<Felt>,
     chip_matrix: &RowMajorMatrix<Felt>,
-    blakeg_matrix: &RowMajorMatrix<Felt>,
+    eidos_compression_matrix: &RowMajorMatrix<Felt>,
     and8_matrix: &RowMajorMatrix<Felt>,
 ) -> Vec<(QuadFelt, (Felt, Vec<String>))> {
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
@@ -711,7 +734,8 @@ fn global_lookup_residuals(
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
     let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
-    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let eidos_compression_periodic =
+        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
 
     let reports = [
         (
@@ -737,11 +761,11 @@ fn global_lookup_residuals(
             ),
         ),
         (
-            "BlakeGCompression",
+            "EidosCompression",
             miden_air::lookup::debug::check_trace_balance(
-                &MidenAir::BLAKEG_COMPRESSION,
-                blakeg_matrix,
-                &blakeg_periodic,
+                &MidenAir::EIDOS_COMPRESSION,
+                eidos_compression_matrix,
+                &eidos_compression_periodic,
                 &public_values,
                 &[],
                 &challenges,
@@ -834,16 +858,18 @@ pub(super) fn assert_trace_constraints_reject(
     trace: &VmTrace,
     core_matrix: RowMajorMatrix<Felt>,
     chip_matrix: RowMajorMatrix<Felt>,
-    blakeg_matrix: RowMajorMatrix<Felt>,
+    eidos_compression_matrix: RowMajorMatrix<Felt>,
     and8_matrix: RowMajorMatrix<Felt>,
 ) {
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
     let statement =
         Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
             .expect("valid statement inputs");
-    let prover_statement =
-        ProverStatement::new(statement, vec![core_matrix, chip_matrix, blakeg_matrix, and8_matrix])
-            .expect("valid trace shapes");
+    let prover_statement = ProverStatement::new(
+        statement,
+        vec![core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix],
+    )
+    .expect("valid trace shapes");
 
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
@@ -875,12 +901,13 @@ fn build_lookup_fractions_matches_constraint_path_oracle_for_mixed_bitwise_aead_
 }
 
 fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &VmTrace) {
-    let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
+    let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns.
     let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
-    let blakeg_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
+    let eidos_compression_periodic =
+        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
     let and8_preprocessed = MidenAir::AND8_LOOKUP
         .preprocessed_trace()
         .expect("byte-pair lookup AIR declares a preprocessed table");
@@ -939,33 +966,38 @@ fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &VmT
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CHIPLETS),
     );
 
-    // --- BlakeG compression ---
-    let blakeg_fractions = build_lookup_fractions(
-        &MidenAir::BLAKEG_COMPRESSION,
-        &blakeg_matrix,
+    // --- Eidos compression ---
+    let eidos_compression_fractions = build_lookup_fractions(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
         None,
-        &blakeg_periodic,
+        &eidos_compression_periodic,
         &challenges,
     );
     assert!(
-        !blakeg_fractions.fractions().is_empty(),
-        "no BlakeG-compression fractions collected - trace is degenerate or emitters are broken",
+        !eidos_compression_fractions.fractions().is_empty(),
+        "no Eidos compression fractions collected - trace is degenerate or emitters are broken",
     );
-    assert_blakeg_compression_oracle_coverage(label, &blakeg_matrix, &blakeg_fractions);
-    let (blakeg_aux, blakeg_sigma_prime) = accumulate(&blakeg_fractions);
-    let blakeg_folds = collect_column_oracle_folds(
-        &MidenAir::BLAKEG_COMPRESSION,
-        &blakeg_matrix,
-        &blakeg_periodic,
+    assert_eidos_compression_oracle_coverage(
+        label,
+        &eidos_compression_matrix,
+        &eidos_compression_fractions,
+    );
+    let (eidos_compression_aux, eidos_compression_sigma_prime) =
+        accumulate(&eidos_compression_fractions);
+    let eidos_compression_folds = collect_column_oracle_folds(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
+        &eidos_compression_periodic,
         &public_vals,
         &challenges,
     );
     assert_prover_matches_oracle(
-        &format!("{label} BlakeGCompression"),
-        &blakeg_aux,
-        blakeg_sigma_prime,
-        &blakeg_folds,
-        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::BLAKEG_COMPRESSION),
+        &format!("{label} EidosCompression"),
+        &eidos_compression_aux,
+        eidos_compression_sigma_prime,
+        &eidos_compression_folds,
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::EIDOS_COMPRESSION),
     );
 
     // --- Byte-pair lookup table ---
@@ -978,7 +1010,7 @@ fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &VmT
     );
     assert!(
         !and8_fractions.fractions().is_empty(),
-        "no byte-pair table fractions collected - BlakeG compression must drive byte lookups",
+        "no byte-pair table fractions collected - Eidos compression must drive byte lookups",
     );
     let (and8_aux, and8_sigma_prime) = accumulate(&and8_fractions);
     let and8_folds = collect_column_oracle_folds(

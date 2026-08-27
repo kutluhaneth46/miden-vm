@@ -24,7 +24,7 @@ end
 #! Push the four AIR log heights in the same proof order as the absorbed auxiliary boundary values.
 #!
 #! `ORDER_TAG` is the Lehmer rank of the proof-order permutation over
-#! [Core, Chiplets, BlakeGCompression, And8Lookup].
+#! [Core, Chiplets, EidosCompression, And8Lookup].
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, log_3, ...]
@@ -34,17 +34,17 @@ pub proc push_proof_order_log_heights
     dup eq.0
     if.true
         drop
-        # Core, Chiplets, BlakeGCompression, And8Lookup.
+        # Core, Chiplets, EidosCompression, And8Lookup.
         exec.layout::get_and8_lookup_trace_length_log
-        exec.layout::get_blakeg_compression_trace_length_log
+        exec.layout::get_eidos_compression_trace_length_log
         exec.layout::get_chiplets_trace_length_log
         exec.layout::get_core_trace_length_log
     else
         dup eq.1
         if.true
             drop
-            # Core, Chiplets, And8Lookup, BlakeGCompression.
-            exec.layout::get_blakeg_compression_trace_length_log
+            # Core, Chiplets, And8Lookup, EidosCompression.
+            exec.layout::get_eidos_compression_trace_length_log
             exec.layout::get_and8_lookup_trace_length_log
             exec.layout::get_chiplets_trace_length_log
             exec.layout::get_core_trace_length_log
@@ -52,26 +52,26 @@ pub proc push_proof_order_log_heights
             dup eq.2
             if.true
                 drop
-                # Core, BlakeGCompression, Chiplets, And8Lookup.
+                # Core, EidosCompression, Chiplets, And8Lookup.
                 exec.layout::get_and8_lookup_trace_length_log
                 exec.layout::get_chiplets_trace_length_log
-                exec.layout::get_blakeg_compression_trace_length_log
+                exec.layout::get_eidos_compression_trace_length_log
                 exec.layout::get_core_trace_length_log
             else
                 dup eq.3
                 if.true
                     drop
-                    # Core, BlakeGCompression, And8Lookup, Chiplets.
+                    # Core, EidosCompression, And8Lookup, Chiplets.
                     exec.layout::get_chiplets_trace_length_log
                     exec.layout::get_and8_lookup_trace_length_log
-                    exec.layout::get_blakeg_compression_trace_length_log
+                    exec.layout::get_eidos_compression_trace_length_log
                     exec.layout::get_core_trace_length_log
                 else
                     dup eq.4
                     if.true
                         drop
-                        # Core, And8Lookup, Chiplets, BlakeGCompression.
-                        exec.layout::get_blakeg_compression_trace_length_log
+                        # Core, And8Lookup, Chiplets, EidosCompression.
+                        exec.layout::get_eidos_compression_trace_length_log
                         exec.layout::get_chiplets_trace_length_log
                         exec.layout::get_and8_lookup_trace_length_log
                         exec.layout::get_core_trace_length_log
@@ -79,26 +79,26 @@ pub proc push_proof_order_log_heights
                         dup eq.5
                         if.true
                             drop
-                            # Core, And8Lookup, BlakeGCompression, Chiplets.
+                            # Core, And8Lookup, EidosCompression, Chiplets.
                             exec.layout::get_chiplets_trace_length_log
-                            exec.layout::get_blakeg_compression_trace_length_log
+                            exec.layout::get_eidos_compression_trace_length_log
                             exec.layout::get_and8_lookup_trace_length_log
                             exec.layout::get_core_trace_length_log
                         else
                             dup eq.6
                             if.true
                                 drop
-                                # Chiplets, Core, BlakeGCompression, And8Lookup.
+                                # Chiplets, Core, EidosCompression, And8Lookup.
                                 exec.layout::get_and8_lookup_trace_length_log
-                                exec.layout::get_blakeg_compression_trace_length_log
+                                exec.layout::get_eidos_compression_trace_length_log
                                 exec.layout::get_core_trace_length_log
                                 exec.layout::get_chiplets_trace_length_log
                             else
                                 dup eq.7
                                 if.true
                                     drop
-                                    # Chiplets, Core, And8Lookup, BlakeGCompression.
-                                    exec.layout::get_blakeg_compression_trace_length_log
+                                    # Chiplets, Core, And8Lookup, EidosCompression.
+                                    exec.layout::get_eidos_compression_trace_length_log
                                     exec.layout::get_and8_lookup_trace_length_log
                                     exec.layout::get_core_trace_length_log
                                     exec.layout::get_chiplets_trace_length_log
@@ -106,26 +106,26 @@ pub proc push_proof_order_log_heights
                                     dup eq.8
                                     if.true
                                         drop
-                                        # Chiplets, BlakeGCompression, Core, And8Lookup.
+                                        # Chiplets, EidosCompression, Core, And8Lookup.
                                         exec.layout::get_and8_lookup_trace_length_log
                                         exec.layout::get_core_trace_length_log
-                                        exec.layout::get_blakeg_compression_trace_length_log
+                                        exec.layout::get_eidos_compression_trace_length_log
                                         exec.layout::get_chiplets_trace_length_log
                                     else
                                         dup eq.9
                                         if.true
                                             drop
-                                            # Chiplets, BlakeGCompression, And8Lookup, Core.
+                                            # Chiplets, EidosCompression, And8Lookup, Core.
                                             exec.layout::get_core_trace_length_log
                                             exec.layout::get_and8_lookup_trace_length_log
-                                            exec.layout::get_blakeg_compression_trace_length_log
+                                            exec.layout::get_eidos_compression_trace_length_log
                                             exec.layout::get_chiplets_trace_length_log
                                         else
                                             dup eq.10
                                             if.true
                                                 drop
-                                                # Chiplets, And8Lookup, Core, BlakeGCompression.
-                                                exec.layout::get_blakeg_compression_trace_length_log
+                                                # Chiplets, And8Lookup, Core, EidosCompression.
+                                                exec.layout::get_eidos_compression_trace_length_log
                                                 exec.layout::get_core_trace_length_log
                                                 exec.layout::get_and8_lookup_trace_length_log
                                                 exec.layout::get_chiplets_trace_length_log
@@ -133,71 +133,71 @@ pub proc push_proof_order_log_heights
                                                 dup eq.11
                                                 if.true
                                                     drop
-                                                    # Chiplets, And8Lookup, BlakeGCompression, Core.
+                                                    # Chiplets, And8Lookup, EidosCompression, Core.
                                                     exec.layout::get_core_trace_length_log
-                                                    exec.layout::get_blakeg_compression_trace_length_log
+                                                    exec.layout::get_eidos_compression_trace_length_log
                                                     exec.layout::get_and8_lookup_trace_length_log
                                                     exec.layout::get_chiplets_trace_length_log
                                                 else
                                                     dup eq.12
                                                     if.true
                                                         drop
-                                                        # BlakeGCompression, Core, Chiplets, And8Lookup.
+                                                        # EidosCompression, Core, Chiplets, And8Lookup.
                                                         exec.layout::get_and8_lookup_trace_length_log
                                                         exec.layout::get_chiplets_trace_length_log
                                                         exec.layout::get_core_trace_length_log
-                                                        exec.layout::get_blakeg_compression_trace_length_log
+                                                        exec.layout::get_eidos_compression_trace_length_log
                                                     else
                                                         dup eq.13
                                                         if.true
                                                             drop
-                                                            # BlakeGCompression, Core, And8Lookup, Chiplets.
+                                                            # EidosCompression, Core, And8Lookup, Chiplets.
                                                             exec.layout::get_chiplets_trace_length_log
                                                             exec.layout::get_and8_lookup_trace_length_log
                                                             exec.layout::get_core_trace_length_log
-                                                            exec.layout::get_blakeg_compression_trace_length_log
+                                                            exec.layout::get_eidos_compression_trace_length_log
                                                         else
                                                             dup eq.14
                                                             if.true
                                                                 drop
-                                                                # BlakeGCompression, Chiplets, Core, And8Lookup.
+                                                                # EidosCompression, Chiplets, Core, And8Lookup.
                                                                 exec.layout::get_and8_lookup_trace_length_log
                                                                 exec.layout::get_core_trace_length_log
                                                                 exec.layout::get_chiplets_trace_length_log
-                                                                exec.layout::get_blakeg_compression_trace_length_log
+                                                                exec.layout::get_eidos_compression_trace_length_log
                                                             else
                                                                 dup eq.15
                                                                 if.true
                                                                     drop
-                                                                    # BlakeGCompression, Chiplets, And8Lookup, Core.
+                                                                    # EidosCompression, Chiplets, And8Lookup, Core.
                                                                     exec.layout::get_core_trace_length_log
                                                                     exec.layout::get_and8_lookup_trace_length_log
                                                                     exec.layout::get_chiplets_trace_length_log
-                                                                    exec.layout::get_blakeg_compression_trace_length_log
+                                                                    exec.layout::get_eidos_compression_trace_length_log
                                                                 else
                                                                     dup eq.16
                                                                     if.true
                                                                         drop
-                                                                        # BlakeGCompression, And8Lookup, Core, Chiplets.
+                                                                        # EidosCompression, And8Lookup, Core, Chiplets.
                                                                         exec.layout::get_chiplets_trace_length_log
                                                                         exec.layout::get_core_trace_length_log
                                                                         exec.layout::get_and8_lookup_trace_length_log
-                                                                        exec.layout::get_blakeg_compression_trace_length_log
+                                                                        exec.layout::get_eidos_compression_trace_length_log
                                                                     else
                                                                         dup eq.17
                                                                         if.true
                                                                             drop
-                                                                            # BlakeGCompression, And8Lookup, Chiplets, Core.
+                                                                            # EidosCompression, And8Lookup, Chiplets, Core.
                                                                             exec.layout::get_core_trace_length_log
                                                                             exec.layout::get_chiplets_trace_length_log
                                                                             exec.layout::get_and8_lookup_trace_length_log
-                                                                            exec.layout::get_blakeg_compression_trace_length_log
+                                                                            exec.layout::get_eidos_compression_trace_length_log
                                                                         else
                                                                             dup eq.18
                                                                             if.true
                                                                                 drop
-                                                                                # And8Lookup, Core, Chiplets, BlakeGCompression.
-                                                                                exec.layout::get_blakeg_compression_trace_length_log
+                                                                                # And8Lookup, Core, Chiplets, EidosCompression.
+                                                                                exec.layout::get_eidos_compression_trace_length_log
                                                                                 exec.layout::get_chiplets_trace_length_log
                                                                                 exec.layout::get_core_trace_length_log
                                                                                 exec.layout::get_and8_lookup_trace_length_log
@@ -205,17 +205,17 @@ pub proc push_proof_order_log_heights
                                                                                 dup eq.19
                                                                                 if.true
                                                                                     drop
-                                                                                    # And8Lookup, Core, BlakeGCompression, Chiplets.
+                                                                                    # And8Lookup, Core, EidosCompression, Chiplets.
                                                                                     exec.layout::get_chiplets_trace_length_log
-                                                                                    exec.layout::get_blakeg_compression_trace_length_log
+                                                                                    exec.layout::get_eidos_compression_trace_length_log
                                                                                     exec.layout::get_core_trace_length_log
                                                                                     exec.layout::get_and8_lookup_trace_length_log
                                                                                 else
                                                                                     dup eq.20
                                                                                     if.true
                                                                                         drop
-                                                                                        # And8Lookup, Chiplets, Core, BlakeGCompression.
-                                                                                        exec.layout::get_blakeg_compression_trace_length_log
+                                                                                        # And8Lookup, Chiplets, Core, EidosCompression.
+                                                                                        exec.layout::get_eidos_compression_trace_length_log
                                                                                         exec.layout::get_core_trace_length_log
                                                                                         exec.layout::get_chiplets_trace_length_log
                                                                                         exec.layout::get_and8_lookup_trace_length_log
@@ -223,26 +223,26 @@ pub proc push_proof_order_log_heights
                                                                                         dup eq.21
                                                                                         if.true
                                                                                             drop
-                                                                                            # And8Lookup, Chiplets, BlakeGCompression, Core.
+                                                                                            # And8Lookup, Chiplets, EidosCompression, Core.
                                                                                             exec.layout::get_core_trace_length_log
-                                                                                            exec.layout::get_blakeg_compression_trace_length_log
+                                                                                            exec.layout::get_eidos_compression_trace_length_log
                                                                                             exec.layout::get_chiplets_trace_length_log
                                                                                             exec.layout::get_and8_lookup_trace_length_log
                                                                                         else
                                                                                             dup eq.22
                                                                                             if.true
                                                                                                 drop
-                                                                                                # And8Lookup, BlakeGCompression, Core, Chiplets.
+                                                                                                # And8Lookup, EidosCompression, Core, Chiplets.
                                                                                                 exec.layout::get_chiplets_trace_length_log
                                                                                                 exec.layout::get_core_trace_length_log
-                                                                                                exec.layout::get_blakeg_compression_trace_length_log
+                                                                                                exec.layout::get_eidos_compression_trace_length_log
                                                                                                 exec.layout::get_and8_lookup_trace_length_log
                                                                                             else
                                                                                                 eq.23 assert.err="invalid proof-order tag"
-                                                                                                # And8Lookup, BlakeGCompression, Chiplets, Core.
+                                                                                                # And8Lookup, EidosCompression, Chiplets, Core.
                                                                                                 exec.layout::get_core_trace_length_log
                                                                                                 exec.layout::get_chiplets_trace_length_log
-                                                                                                exec.layout::get_blakeg_compression_trace_length_log
+                                                                                                exec.layout::get_eidos_compression_trace_length_log
                                                                                                 exec.layout::get_and8_lookup_trace_length_log
                                                                                             end
                                                                                         end

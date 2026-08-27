@@ -1,6 +1,6 @@
 //! Controller sub-chiplet constraints.
 //!
-//! The controller records one BlakeG compression request per row. Hash rows carry
+//! The controller records one Eidos compression request per row. Hash rows carry
 //! `block[8] || cv_in[4]` in `state` and `cv_out[4]` in `row_data`. Merkle rows carry
 //! `block[8] || cv_out[4]` in `state` and `[node_index, node_index_next, is_start, 0]`
 //! in `row_data`.
@@ -144,14 +144,14 @@ pub fn enforce_controller_constraints<AB>(
         builder.assert_eq(cols.s2, cols_next.s2);
     }
 
-    // Hash continuation: the next hash row's input CV equals this row's output digest.
+    // Hash continuation: the next hash row's input CV equals this row's output CV.
     {
         let gate = chiplet.is_active.clone() * rows.is_hash * op_final.not();
         let cv_next = cols_next.state_tail();
-        let digest = cols.hash_digest();
+        let cv_out = cols.hash_cv();
         let builder = &mut builder.when(gate);
         for i in 0..4 {
-            builder.assert_eq(cv_next[i], digest[i]);
+            builder.assert_eq(cv_next[i], cv_out[i]);
         }
     }
 
@@ -168,8 +168,8 @@ pub fn enforce_controller_constraints<AB>(
         builder.assert_bool(bit);
     }
 
-    // Merkle continuation: carry the shifted index and route the digest into the next row's
-    // selected rate half, using the next row's virtual direction bit.
+    // Merkle continuation: carry the shifted index and route the digest into the selected block
+    // word of the next row, using that row's virtual direction bit.
     {
         let merkle_cont = controller_merkle.clone() * op_final.not();
         let builder = &mut builder.when(merkle_cont);
@@ -179,12 +179,12 @@ pub fn enforce_controller_constraints<AB>(
         let node_index_after_next: AB::Expr = cols_next.merkle_node_index_next().into();
         let bit_next = node_index_next - node_index_after_next.double();
         let digest = cols.merkle_digest();
-        let rate0_next = cols_next.rate0();
-        let rate1_next = cols_next.rate1();
+        let block_lo_next = cols_next.block_lo();
+        let block_hi_next = cols_next.block_hi();
         for j in 0..4 {
             builder.assert_eq(
                 digest[j],
-                rate0_next[j] + bit_next.clone() * (rate1_next[j] - rate0_next[j]),
+                block_lo_next[j] + bit_next.clone() * (block_hi_next[j] - block_lo_next[j]),
             );
         }
     }
@@ -368,8 +368,8 @@ mod tests {
         }
     }
 
-    fn set_rate0(row: &mut ChipletCols<Felt>, digest: [Felt; 4]) {
-        for (i, value) in digest.into_iter().enumerate() {
+    fn set_block_lo(row: &mut ChipletCols<Felt>, word: [Felt; 4]) {
+        for (i, value) in word.into_iter().enumerate() {
             row.chiplets[CTRL_STATE_BASE + i] = value;
         }
     }
@@ -403,7 +403,7 @@ mod tests {
     fn valid_merkle_continuation_pair() -> (ChipletCols<Felt>, ChipletCols<Felt>) {
         let local = merkle_controller_row(MP_VERIFY_SELECTORS, 5, true, false);
         let mut next = merkle_controller_row(MP_VERIFY_SELECTORS, 2, false, true);
-        set_rate0(&mut next, merkle_digest(&local));
+        set_block_lo(&mut next, merkle_digest(&local));
         (local, next)
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert_rejects(
             &local,
             &next,
-            "Merkle continuation must route digest into the next selected rate half",
+            "Merkle continuation must route digest into the next selected block half",
         );
     }
 

@@ -14,7 +14,7 @@ pub(super) struct TraceShape {
     core_rows: usize,
     byte_pair_lookup_rows: usize,
     chiplets_rows: usize,
-    blakeg_compression_rows: usize,
+    eidos_compression_rows: usize,
     hash_chiplet_rows: usize,
     bitwise_rows: usize,
     memory_rows: usize,
@@ -44,19 +44,19 @@ pub(super) fn trace_shape_summary_for(summary: &TraceLenSummary) -> TraceShape {
     let max_trace_rows = summary
         .core_rows()
         .max(summary.chiplets_rows())
-        .max(summary.blakeg_compression_rows())
+        .max(summary.eidos_compression_rows())
         .max(summary.byte_pair_lookup_rows());
     let max_padded_rows = summary
         .core_height()
         .max(summary.chiplets_height())
-        .max(summary.blakeg_compression_height())
+        .max(summary.eidos_compression_height())
         .max(summary.byte_pair_lookup_rows());
 
     TraceShape {
         core_rows: summary.core_rows(),
         byte_pair_lookup_rows: summary.byte_pair_lookup_rows(),
         chiplets_rows: summary.chiplets_rows(),
-        blakeg_compression_rows: summary.blakeg_compression_rows(),
+        eidos_compression_rows: summary.eidos_compression_rows(),
         hash_chiplet_rows: chiplets.hash_chiplet_len(),
         bitwise_rows: chiplets.bitwise_chiplet_len(),
         memory_rows: chiplets.memory_chiplet_len(),
@@ -247,12 +247,12 @@ pub(super) fn print_case_shape(case: &RecursionCase) -> CaseTraceShape {
     let trace = trace_shape_summary(case);
 
     println!(
-        "    {} core={} and8={} chiplets={} blakeg={} hash_ctrl={} max_trace={} max_padded={}",
+        "    {} core={} and8={} chiplets={} eidos_compression={} hash_ctrl={} max_trace={} max_padded={}",
         case.composition.label(),
         trace.core_rows,
         trace.byte_pair_lookup_rows,
         trace.chiplets_rows,
-        trace.blakeg_compression_rows,
+        trace.eidos_compression_rows,
         trace.hash_chiplet_rows,
         trace.max_trace_rows,
         trace.max_padded_rows,
@@ -267,7 +267,7 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
     println!(
         concat!(
             "{} ",
-            "core_rows={} byte_pair_lookup_rows={} chiplets_rows={} blakeg_compression_rows={} ",
+            "core_rows={} byte_pair_lookup_rows={} chiplets_rows={} eidos_compression_rows={} ",
             "hash_chiplet_rows={} bitwise_rows={} memory_rows={} ace_rows={} kernel_rows={} ",
             "native_hash_rows={} and8_lookup_rows={} max_trace_rows={} max_padded_rows={}"
         ),
@@ -275,13 +275,13 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
         shape.core_rows,
         shape.byte_pair_lookup_rows,
         shape.chiplets_rows,
-        shape.blakeg_compression_rows,
+        shape.eidos_compression_rows,
         shape.hash_chiplet_rows,
         shape.bitwise_rows,
         shape.memory_rows,
         shape.ace_rows,
         shape.kernel_rows,
-        shape.blakeg_compression_rows,
+        shape.eidos_compression_rows,
         shape.byte_pair_lookup_rows,
         shape.max_trace_rows,
         shape.max_padded_rows,
@@ -291,7 +291,7 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
 pub(super) fn print_trace_shape_summary(shapes: &[CaseTraceShape]) {
     println!("\n=== recursive trace summary");
     println!(
-        "| MVM proofs | PVM proofs | core | and8 | chiplets | BlakeG | hash | bitwise | memory | ace | kernel | max_trace | padded |"
+        "| MVM proofs | PVM proofs | core | and8 | chiplets | EidosCompression | hash | bitwise | memory | ace | kernel | max_trace | padded |"
     );
     println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
     for case in shapes {
@@ -303,7 +303,7 @@ pub(super) fn print_trace_shape_summary(shapes: &[CaseTraceShape]) {
             shape.core_rows,
             shape.byte_pair_lookup_rows,
             shape.chiplets_rows,
-            shape.blakeg_compression_rows,
+            shape.eidos_compression_rows,
             shape.hash_chiplet_rows,
             shape.bitwise_rows,
             shape.memory_rows,

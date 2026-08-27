@@ -1,8 +1,9 @@
-//! Final hasher digest-return bus interactions.
+//! Four-Felt hasher-return bus interactions.
 //!
-//! A single-row controller operation can emit an operation-init response and a final digest return
-//! on the same row. Init responses stay in the shared chiplet-responses column; this column carries
-//! the final digest return so the response column keeps its single-denominator hasher shape.
+//! A single-row controller operation can emit an operation-init response and a four-Felt return on
+//! the same row. Init responses stay in the shared chiplet-responses column; this column carries
+//! completed hash digests and raw-compression CV updates so the response column keeps its
+//! single-denominator hasher shape.
 
 use crate::{
     constraints::{
@@ -18,7 +19,7 @@ use crate::{
 /// Upper bound on fractions this emitter pushes into its column per row.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
 
-/// Emit final hasher digest responses.
+/// Emit four-Felt hasher responses.
 pub(in crate::constraints::lookup) fn emit_hasher_returns<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
@@ -38,7 +39,7 @@ pub(in crate::constraints::lookup) fn emit_hasher_returns<LB>(
     let merkle_return = merkle_or_padding * ctrl_s0 * op_final;
 
     let addr: LB::Expr = local.chip_clk.into();
-    let hash_digest = ctrl.hash_digest();
+    let hash_result = ctrl.hash_cv();
     let merkle_digest = ctrl.merkle_digest();
 
     builder.next_column(
@@ -49,7 +50,7 @@ pub(in crate::constraints::lookup) fn emit_hasher_returns<LB>(
                     g.add(
                         "hash_return",
                         hash_return,
-                        || HasherMsg::return_hash(addr.clone(), hash_digest.map(LB::Expr::from)),
+                        || HasherMsg::return_hash(addr.clone(), hash_result.map(LB::Expr::from)),
                         Deg { v: 3, u: 4 },
                     );
                     g.add(

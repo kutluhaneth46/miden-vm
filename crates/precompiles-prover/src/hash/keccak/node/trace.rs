@@ -43,7 +43,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     transcript::eidos::{
-        digest::{EidosCap, EidosDigest},
+        digest::{EidosChainContext, EidosDigest},
         trace::{AbsorptionId, EidosRequires},
     },
 };
@@ -62,8 +62,7 @@ pub struct KeccakNodeInvocation {
     /// `[lo_0, hi_0, lo_1, hi_1, lo_2, hi_2, lo_3, hi_3]` (lane `j` =
     /// `(d[2j], d[2j+1])` as u32 halves on Memory64).
     pub d: [u32; 8],
-    /// The chunk chain's cumulative Eidos digest at its tail (= the
-    /// `OutRate0` value read from the chunk chiplet's chain end).
+    /// The chunk chain's terminal Eidos digest, read from `EidosOut` at the chain end.
     pub h_input_chunks: [Felt; 4],
     /// Head of this invocation's chunk chain in the chunk chiplet's
     /// namespace ([`ChunkSeqId::ptr`] gives the word address the sponge
@@ -74,7 +73,8 @@ pub struct KeccakNodeInvocation {
     /// Eidos cycle for hashing the Keccak digest as a semantic chunk.
     pub absorption_id_digest_chunks: AbsorptionId,
     /// Eidos cycle for the keccak-node hashing
-    /// (= `Eidos(H_input_chunks || H_digest_chunks || cap_keccak256_assertion(len_bytes))`).
+    /// (= the framed Eidos Keccak-node digest of `H_input_chunks || H_digest_chunks`, under the
+    /// assertion context bound to `len_bytes`).
     pub absorption_id_keccak: AbsorptionId,
     /// Sponge invocation start (the sponge's row at the first row of
     /// this invocation).
@@ -262,25 +262,27 @@ impl KeccakNodeRequires {
         let h_input_chunks: [Felt; NUM_HASH] = h_input_chunks_digest.as_array();
         let _ = eidos.require_digest(h_input_chunks_digest);
 
-        // H_digest_chunks = Eidos(D || cap_chunk). This is a semantic
-        // one-chunk digest commitment, not a physical extra ChunkAir row.
+        // H_digest_chunks is the framed Eidos hash of D under the CHUNKS chain context. This is a
+        // semantic one-chunk digest commitment, not a physical extra ChunkAir row.
         let d_felts = sponge_out.keccak_digest.to_felts();
-        let d_rate0: [Felt; 4] = d_felts[0..4].try_into().expect("rate0 slice");
-        let d_rate1: [Felt; 4] = d_felts[4..8].try_into().expect("rate1 slice");
-        let digest_chunks_out = eidos.require_one_shot(EidosCap::chunk(), d_rate0, d_rate1);
+        let digest_block_lo: [Felt; 4] = d_felts[0..4].try_into().expect("block-low slice");
+        let digest_block_hi: [Felt; 4] = d_felts[4..8].try_into().expect("block-high slice");
+        let digest_chunks_out =
+            eidos.require_one_shot(EidosChainContext::chunk(), digest_block_lo, digest_block_hi);
         let h_digest_chunks = digest_chunks_out.digest;
-        // OutRate0 read at absorption_id_digest_chunks — bump.
+        // Consume the terminal EidosOut value at absorption_id_digest_chunks.
         let _ = eidos.require_digest(h_digest_chunks);
 
-        // H_keccak = Eidos(H_input_chunks || H_digest_chunks || cap_keccak)
+        // H_keccak is the framed Eidos hash of H_input_chunks || H_digest_chunks under the
+        // Keccak-assertion chain context.
         let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_out = eidos.require_one_shot(
-            EidosCap::keccak256_assertion(len_bytes),
+            EidosChainContext::keccak256_assertion(len_bytes),
             h_input_chunks,
             h_digest_chunks.as_array(),
         );
         let h_keccak = keccak_out.digest;
-        // OutRate0 read at absorption_id_keccak — bump.
+        // Consume the terminal EidosOut value at absorption_id_keccak.
         let _ = eidos.require_digest(h_keccak);
 
         let invocation = KeccakNodeInvocation {

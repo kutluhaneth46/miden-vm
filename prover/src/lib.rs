@@ -61,7 +61,7 @@ fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
     chiplets_trace: RowMajorMatrix<Felt>,
-    blakeg_trace: RowMajorMatrix<Felt>,
+    eidos_compression_trace: RowMajorMatrix<Felt>,
     and8_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
     aux_inputs: &[Felt],
@@ -79,9 +79,11 @@ where
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let prover_statement =
-        ProverStatement::new(statement, vec![core_trace, chiplets_trace, blakeg_trace, and8_trace])
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let prover_statement = ProverStatement::new(
+        statement,
+        vec![core_trace, chiplets_trace, eidos_compression_trace, and8_trace],
+    )
+    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
     #[cfg(feature = "std")]
     let preprocessed_arc = cached_preprocessed_setup(prover_statement.statement(), config);

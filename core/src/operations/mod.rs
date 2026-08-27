@@ -100,7 +100,7 @@ pub mod opcodes {
     pub const U32ADD3: u8        = 0b0100_1100;
     pub const U32MADD: u8        = 0b0100_1110;
 
-    pub const BCOMPRESS: u8      = 0b0101_0000;
+    pub const COMPRESS: u8      = 0b0101_0000;
     pub const MPVERIFY: u8       = 0b0101_0001;
     pub const PIPE: u8           = 0b0101_0010;
     pub const MSTREAM: u8        = 0b0101_0011;
@@ -481,7 +481,7 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = opcodes::PIPE,
 
-    /// Encrypts two memory words with a BlakeG-XOF keystream.
+    /// Encrypts two memory words with an Eidos XOF keystream.
     ///
     /// Stack transition:
     /// ```text
@@ -492,11 +492,12 @@ pub enum Operation {
     CryptoStream = opcodes::CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
-    /// Performs a block-preserving BlakeG compression on the top 3 words of the operand stack.
+    /// Performs a block-preserving Eidos compression on the top 3 words of the operand
+    /// stack.
     ///
     /// Stack transition:
     /// [block(8), cv(4), ...] -> [block(8), cv'(4), ...]
-    BCompress = opcodes::BCOMPRESS,
+    Compress = opcodes::COMPRESS,
 
     /// Verifies that a Merkle path from the specified node resolves to the specified root. This
     /// operation can be used to prove that the prover knows a path in the specified Merkle tree
@@ -779,7 +780,7 @@ impl fmt::Display for Operation {
             Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
-            Self::BCompress => write!(f, "bcompress"),
+            Self::Compress => write!(f, "compress"),
             Self::MpVerify(err_code) => write!(f, "mpverify({err_code})"),
             Self::MrUpdate => write!(f, "mrupdate"),
 
@@ -879,7 +880,7 @@ impl Serializable for Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::BCompress
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -973,7 +974,7 @@ impl Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::BCompress
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -1065,7 +1066,7 @@ impl Deserializable for Operation {
             opcodes::U32ADD3 => Self::U32add3,
             opcodes::U32MADD => Self::U32madd,
 
-            opcodes::BCOMPRESS => Self::BCompress,
+            opcodes::COMPRESS => Self::Compress,
             opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             opcodes::PIPE => Self::Pipe,
             opcodes::MSTREAM => Self::MStream,

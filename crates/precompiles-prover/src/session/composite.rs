@@ -25,7 +25,7 @@ use crate::{
 const BPL_VALUE_OFFSET: usize = 0;
 const AND8_VALUE_OFFSET: usize = 1;
 
-/// The PVM byte-pair table and Miden BlakeG byte table in disjoint column bands.
+/// The PVM byte-pair table and Miden Eidos compression byte table in disjoint column bands.
 ///
 /// Both tables enumerate `(a, b) in [0, 256)^2` in the same row order at the same fixed 2^16
 /// height. Combining their commitments therefore adds no padding cells.

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use miden_air::{
     MIDEN_AIR_COUNT, PcsParams, memory,
-    trace::{MIN_TRACE_LEN, blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN},
+    trace::{MIN_TRACE_LEN, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 
 use super::chiplets::Chiplets;
@@ -178,7 +178,7 @@ impl<'a> ChipletTraceFragment<'a> {
 pub struct TraceLenSummary {
     core_rows: usize,
     chiplets: ChipletsLengths,
-    blakeg_compression_rows: usize,
+    eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
     /// Set by the trace builder when known, in [`miden_air::AIRS`] order. `None` falls back to
     /// deriving the four padded heights from the unpadded component row counts.
@@ -189,31 +189,31 @@ impl TraceLenSummary {
     pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
-        blakeg_compression_rows: usize,
+        eidos_compression_rows: usize,
         byte_pair_lookup_rows: usize,
     ) -> Self {
         TraceLenSummary {
             core_rows,
             chiplets,
-            blakeg_compression_rows,
+            eidos_compression_rows,
             byte_pair_lookup_rows,
             padded_heights: None,
         }
     }
 
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
-    /// [`miden_air::AIRS`] order: Core, Chiplets, BlakeG compression, then And8 lookup.
+    /// [`miden_air::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
     pub fn new_with_padded(
         core_rows: usize,
         chiplets: ChipletsLengths,
-        blakeg_compression_rows: usize,
+        eidos_compression_rows: usize,
         byte_pair_lookup_rows: usize,
         padded_heights: [usize; MIDEN_AIR_COUNT],
     ) -> Self {
         TraceLenSummary {
             core_rows,
             chiplets,
-            blakeg_compression_rows,
+            eidos_compression_rows,
             byte_pair_lookup_rows,
             padded_heights: Some(padded_heights),
         }
@@ -234,15 +234,16 @@ impl TraceLenSummary {
         self.chiplets.trace_len()
     }
 
-    /// Returns the unpadded BlakeG-compression AIR rows.
-    pub fn blakeg_compression_rows(&self) -> usize {
-        self.blakeg_compression_rows
+    /// Returns the unpadded Eidos compression AIR rows.
+    pub fn eidos_compression_rows(&self) -> usize {
+        self.eidos_compression_rows
     }
 
-    /// Returns the number of BlakeG compression blocks represented by the BlakeG AIR rows.
-    pub fn blakeg_compression_count(&self) -> usize {
-        debug_assert_eq!(self.blakeg_compression_rows % BLAKEG_COMPRESSION_CYCLE_LEN, 0);
-        self.blakeg_compression_rows / BLAKEG_COMPRESSION_CYCLE_LEN
+    /// Returns the number of Eidos compression blocks represented by the standalone compression
+    /// AIR rows.
+    pub fn eidos_compression_count(&self) -> usize {
+        debug_assert_eq!(self.eidos_compression_rows % EIDOS_COMPRESSION_CYCLE_LEN, 0);
+        self.eidos_compression_rows / EIDOS_COMPRESSION_CYCLE_LEN
     }
 
     /// Returns the fixed byte-pair lookup AIR rows.
@@ -256,7 +257,7 @@ impl TraceLenSummary {
     pub fn trace_len(&self) -> usize {
         self.core_rows
             .max(self.chiplets_rows())
-            .max(self.blakeg_compression_rows)
+            .max(self.eidos_compression_rows)
             .max(self.byte_pair_lookup_rows)
     }
 
@@ -270,9 +271,9 @@ impl TraceLenSummary {
         padded_height(self.chiplets_rows())
     }
 
-    /// Returns the padded height of the BlakeG-compression AIR.
-    pub fn blakeg_compression_height(&self) -> usize {
-        padded_height(self.blakeg_compression_rows)
+    /// Returns the padded height of the Eidos compression AIR.
+    pub fn eidos_compression_height(&self) -> usize {
+        padded_height(self.eidos_compression_rows)
     }
 
     /// Returns the greatest padded height among the four AIRs.
@@ -282,7 +283,7 @@ impl TraceLenSummary {
             .unwrap_or_else(|| {
                 self.core_height()
                     .max(self.chiplets_height())
-                    .max(self.blakeg_compression_height())
+                    .max(self.eidos_compression_height())
                     .max(self.byte_pair_lookup_rows)
             })
     }
@@ -309,16 +310,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trace_len_summary_reports_blakeg_compression_count() {
-        let summary = TraceLenSummary::new(
-            0,
-            ChipletsLengths::default(),
-            3 * BLAKEG_COMPRESSION_CYCLE_LEN,
-            0,
-        );
+    fn trace_len_summary_reports_eidos_compression_count() {
+        let summary =
+            TraceLenSummary::new(0, ChipletsLengths::default(), 3 * EIDOS_COMPRESSION_CYCLE_LEN, 0);
 
-        assert_eq!(summary.blakeg_compression_rows(), 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
-        assert_eq!(summary.blakeg_compression_count(), 3);
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.eidos_compression_count(), 3);
     }
 
     #[test]
@@ -327,7 +324,7 @@ mod tests {
         let summary = TraceLenSummary::new_with_padded(
             17,
             ChipletsLengths::from_parts(19, 0, 0, 0, 0),
-            3 * BLAKEG_COMPRESSION_CYCLE_LEN,
+            3 * EIDOS_COMPRESSION_CYCLE_LEN,
             1 << 16,
             heights,
         );
@@ -335,7 +332,7 @@ mod tests {
         assert_eq!(summary.core_rows(), 17);
         // ChipletsLengths adds the mandatory connector-padding row.
         assert_eq!(summary.chiplets_rows(), 20);
-        assert_eq!(summary.blakeg_compression_rows(), 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
         assert_eq!(summary.padded_heights(), Some(&heights));
         assert_eq!(summary.padded_trace_len(), 1 << 16);

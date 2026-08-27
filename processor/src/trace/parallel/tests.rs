@@ -3,7 +3,7 @@ use alloc::{string::String, sync::Arc};
 use miden_air::{
     MidenAir,
     lookup::build_logup_aux_trace,
-    trace::{RowIndex, blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN},
+    trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
@@ -409,27 +409,34 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let (core_from_fragments, chip_from_fragments, blakeg_from_fragments, and8_from_fragments) =
-        trace_from_fragments.main_trace().to_air_matrices();
-    let (core_from_single, chip_from_single, blakeg_from_single, and8_from_single) =
+    let (
+        core_from_fragments,
+        chip_from_fragments,
+        eidos_compression_from_fragments,
+        and8_from_fragments,
+    ) = trace_from_fragments.main_trace().to_air_matrices();
+    let (core_from_single, chip_from_single, eidos_compression_from_single, and8_from_single) =
         trace_from_single_fragment.main_trace().to_air_matrices();
 
     // Compare every committed main-trace cell exactly. The column-oriented check above provides
     // precise diagnostics for the Core and Chiplets matrices; these assertions extend the exact
-    // comparison to the independently committed BlakeG and And8 matrices.
+    // comparison to the independently committed Eidos compression and And8 matrices.
     assert_eq!(core_from_fragments, core_from_single, "Core main trace mismatch");
     assert_eq!(chip_from_fragments, chip_from_single, "Chiplets main trace mismatch");
-    assert_eq!(blakeg_from_fragments, blakeg_from_single, "BlakeG main trace mismatch");
+    assert_eq!(
+        eidos_compression_from_fragments, eidos_compression_from_single,
+        "EidosCompression main trace mismatch"
+    );
     assert_eq!(and8_from_fragments, and8_from_single, "And8 main trace mismatch");
 
     for (label, air, air_frag, air_single) in [
         ("Core", MidenAir::CORE, &core_from_fragments, &core_from_single),
         ("Chiplets", MidenAir::CHIPLETS, &chip_from_fragments, &chip_from_single),
         (
-            "BlakeGCompression",
-            MidenAir::BLAKEG_COMPRESSION,
-            &blakeg_from_fragments,
-            &blakeg_from_single,
+            "EidosCompression",
+            MidenAir::EIDOS_COMPRESSION,
+            &eidos_compression_from_fragments,
+            &eidos_compression_from_single,
         ),
         ("And8Lookup", MidenAir::AND8_LOOKUP, &and8_from_fragments, &and8_from_single),
     ] {
@@ -451,7 +458,7 @@ fn test_trace_generation_at_fragment_boundaries(
         trace: &trace_from_fragments,
         core: &core_from_fragments,
         chiplets: &chip_from_fragments,
-        blakeg: &blakeg_from_fragments,
+        eidos_compression: &eidos_compression_from_fragments,
         and8: &and8_from_fragments,
     };
     insta::assert_compact_debug_snapshot!(testname, trace_snapshot);
@@ -1270,11 +1277,11 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_budget` returns `ProverMemoryExceeded` when the BlakeG
+/// Verifies that `build_trace_with_budget` returns `ProverMemoryExceeded` when the Eidos
 /// compression trace pushes the exact modelled peak over budget. The AIRs pad independently, so
-/// a cheap core/chiplets trace does not bound the BlakeG AIR height.
+/// a cheap core/chiplets trace does not bound the Eidos compression AIR height.
 #[test]
-fn test_build_trace_returns_err_when_blakeg_trace_exceeds_budget() {
+fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     // Use the DYN program because it exercises both hasher and memory chiplets.
     let program = dyn_program();
     let stack_inputs = dyn_target_proc_hash();
@@ -1292,15 +1299,15 @@ fn test_build_trace_returns_err_when_blakeg_trace_exceeds_budget() {
         processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0
     }
 
-    // Inject enough unique compression requests that the padded BlakeG trace is strictly taller
-    // than the fixed And8 table as well as the core and chiplets traces. Unique states prevent
-    // replay deduplication from weakening the test.
+    // Inject enough unique compression requests that the padded Eidos compression trace is strictly
+    // taller than the fixed And8 table as well as the core and chiplets traces. Unique states
+    // prevent replay deduplication from weakening the test.
     fn inject_extra_compressions(vm_witness: &mut VmWitness) {
-        let num_compressions = AND8_LOOKUP_TRACE_HEIGHT / BLAKEG_COMPRESSION_CYCLE_LEN + 1;
+        let num_compressions = AND8_LOOKUP_TRACE_HEIGHT / EIDOS_COMPRESSION_CYCLE_LEN + 1;
         for i in 0..num_compressions {
             let mut state = [ZERO; 12];
             state[0] = Felt::from_u32(i as u32);
-            vm_witness.trace_replay_mut().hasher_for_chiplet.record_bcompress_input(state);
+            vm_witness.trace_replay_mut().hasher_for_chiplet.record_compress_input(state);
         }
     }
 
@@ -1311,12 +1318,12 @@ fn test_build_trace_returns_err_when_blakeg_trace_exceeds_budget() {
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
     let heights = *summary.padded_heights().expect("build_trace records padded heights");
-    let blakeg_height = heights[MidenAir::BlakeGCompression.instance_index()];
+    let eidos_compression_height = heights[MidenAir::EidosCompression.instance_index()];
     assert!(
-        blakeg_height > heights[MidenAir::Core.instance_index()]
-            && blakeg_height > heights[MidenAir::Chiplets.instance_index()]
-            && blakeg_height > heights[MidenAir::And8Lookup.instance_index()],
-        "test setup must make the BlakeG AIR the dominant height: {heights:?}"
+        eidos_compression_height > heights[MidenAir::Core.instance_index()]
+            && eidos_compression_height > heights[MidenAir::Chiplets.instance_index()]
+            && eidos_compression_height > heights[MidenAir::And8Lookup.instance_index()],
+        "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
     let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
 
@@ -1420,14 +1427,14 @@ struct DeterministicTrace<'a> {
     trace: &'a VmTrace,
     core: &'a RowMajorMatrix<Felt>,
     chiplets: &'a RowMajorMatrix<Felt>,
-    blakeg: &'a RowMajorMatrix<Felt>,
+    eidos_compression: &'a RowMajorMatrix<Felt>,
     and8: &'a RowMajorMatrix<Felt>,
 }
 
 struct AirMatrixSummaries {
     core: MatrixSummary,
     chiplets: MatrixSummary,
-    blakeg_compression: MatrixSummary,
+    eidos_compression: MatrixSummary,
     and8_lookup: MatrixSummary,
 }
 
@@ -1443,7 +1450,7 @@ impl core::fmt::Debug for AirMatrixSummaries {
         f.debug_struct("AirMatrixSummaries")
             .field("core", &self.core)
             .field("chiplets", &self.chiplets)
-            .field("blakeg_compression", &self.blakeg_compression)
+            .field("eidos_compression", &self.eidos_compression)
             .field("and8_lookup", &self.and8_lookup)
             .finish()
     }
@@ -1490,7 +1497,7 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
         let air_matrices = AirMatrixSummaries {
             core: MatrixSummary::new(self.core),
             chiplets: MatrixSummary::new(self.chiplets),
-            blakeg_compression: MatrixSummary::new(self.blakeg),
+            eidos_compression: MatrixSummary::new(self.eidos_compression),
             and8_lookup: MatrixSummary::new(self.and8),
         };
 

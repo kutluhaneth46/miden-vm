@@ -1,3 +1,3 @@
 use super::Felt;
-pub mod blakeg;
+pub mod eidos_compression;
 pub mod hasher;

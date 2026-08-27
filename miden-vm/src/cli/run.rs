@@ -112,7 +112,7 @@ impl RunCmd {
     ├── Bitwise chiplet rows: {}
     ├── Memory chiplet rows: {}
     └── Kernel ROM rows: {}
-├── BlakeG compression rows: {} extended to {} ({}% padding)
+├── Eidos compression rows: {} extended to {} ({}% padding)
 └── Byte-pair lookup rows: {} (fixed table)",
             summary.core_rows(),
             summary.core_height(),
@@ -124,11 +124,11 @@ impl RunCmd {
             chiplets.bitwise_chiplet_len(),
             chiplets.memory_chiplet_len(),
             chiplets.kernel_rom_len(),
-            summary.blakeg_compression_rows(),
-            summary.blakeg_compression_height(),
+            summary.eidos_compression_rows(),
+            summary.eidos_compression_height(),
             padding_percentage(
-                summary.blakeg_compression_rows(),
-                summary.blakeg_compression_height()
+                summary.eidos_compression_rows(),
+                summary.eidos_compression_height()
             ),
             summary.byte_pair_lookup_rows(),
         );

@@ -24,8 +24,8 @@
 //!   `LookupAir` impl.
 //! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
 //!   [`crate::ChipletsAir`]'s `LookupAir` impl.
-//! - [`crate::constraints::blakeg_compression::lookup`] for the standalone BlakeG compression
-//!   columns, driven by [`crate::BlakeGCompressionAir`]'s `LookupAir` impl.
+//! - [`crate::constraints::eidos_compression::lookup`] for the standalone Eidos compression
+//!   columns, driven by [`crate::EidosCompressionAir`]'s `LookupAir` impl.
 //! - [`crate::constraints::and8_lookup`] for the fixed byte-table columns, driven by
 //!   [`crate::And8LookupAir`]'s `LookupAir` impl.
 //!

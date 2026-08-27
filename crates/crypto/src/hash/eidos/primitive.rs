@@ -1,18 +1,16 @@
 //! Goldilocks-tailored BLAKE3 compression.
 //!
-//! BlakeG uses BLAKE3's 7-round compression core with fixed parameter words.
+//! Eidos uses BLAKE3's seven-round compression schedule with fixed parameter words.
 //! `compress` clears the top bit of odd output lanes so the 8-word chaining
 //! value packs losslessly into four Goldilocks field elements:
 //! `pack(lo, hi) = ((hi & 0x7fff_ffff) << 32) | lo`.
 
 mod blake3_schedule;
 
-#[cfg(test)]
 pub(super) const IV: [u32; 8] = blake3_schedule::IV;
 pub(super) const PACKED_LANES: usize = blake3_schedule::PACKED_LANES;
 
-/// Mask applied to odd output lanes before field-element packing.
-const ODD_LANE_MASK: u32 = 0x7fff_ffff;
+use super::encoding::ODD_LANE_MASK;
 
 #[inline(always)]
 fn apply_output_mask(cv: &mut [u32; 8]) {
@@ -33,10 +31,10 @@ fn apply_packed_output_mask<const LANES: usize>(cv: &mut [[u32; LANES]; 8]) {
 
 /// Goldilocks-tailored BLAKE3 compression.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(super) struct BlakeG;
+pub(super) struct CompressionCore;
 
-impl BlakeG {
-    /// Applies BlakeG and masks the odd output lanes.
+impl CompressionCore {
+    /// Apply the Eidos compression core and mask the odd output lanes.
     ///
     /// The input chaining value may contain arbitrary `u32` lanes. The
     /// Goldilocks subspace mask is an output-finalization rule, not an input
@@ -47,23 +45,23 @@ impl BlakeG {
         cv_new
     }
 
-    /// Apply BlakeG's compression function without the Goldilocks output mask.
+    /// Apply the compression function without the Goldilocks output mask.
     ///
-    /// Returns the eight folded BLAKE3/BlakeG output words:
+    /// Returns the eight folded BLAKE3-derived output words:
     ///
     /// ```text
     /// out[i] = v[i] ^ v[i + 8]
     /// ```
     ///
     /// These are the words consumed by [`Self::compress`] before odd-lane masking.
-    /// This is a raw compression output, not an Eidos digest. Callers that use
-    /// BlakeG as a hash must bind domain, mode, and length into the input CV.
+    /// This is a raw compression output, not an Eidos digest. Callers that use the compression
+    /// function directly must bind domain, mode, and length into the input CV.
     pub fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         blake3_schedule::compress_raw(cv, block)
     }
 
-    /// Apply BlakeG and return the full 16-word XOF output (low half || high
-    /// half), without the Goldilocks output mask.
+    /// Return the full 16-word XOF output (low half || high half), without the Goldilocks output
+    /// mask.
     ///
     /// ```text
     /// out[i]     = v[i] ^ v[i + 8]    (i in 0..8)   // standard CV fold (low half)
@@ -78,7 +76,7 @@ impl BlakeG {
         blake3_schedule::compress_raw_xof(cv, block)
     }
 
-    /// Apply BlakeG to several independent lanes with the same instruction stream.
+    /// Apply compression to several independent lanes with the same instruction stream.
     ///
     /// Lane `i` of the result is identical to `compress(cv_i, block_i)`, where
     /// `cv_i[j] = cv[j][i]` and `block_i[j] = block[j][i]`.
@@ -92,7 +90,7 @@ impl BlakeG {
         cv_new
     }
 
-    /// Apply BlakeG to the build's selected native packed lane width.
+    /// Apply compression to the build's selected native packed lane width.
     #[inline]
     pub(super) fn compress_packed_native(
         cv: [[u32; PACKED_LANES]; 8],
@@ -205,14 +203,14 @@ mod tests {
     }
 
     #[test]
-    fn blakeg_is_blake3_core_with_fixed_iv_tail_and_mask() {
+    fn eidos_compression_is_blake3_core_with_fixed_iv_tail_and_mask() {
         let cv = TEST_CV;
         let block = test_block();
         let mut expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
 
         mask_odd_lanes(&mut expected);
 
-        assert_eq!(BlakeG::compress(cv, block), expected);
+        assert_eq!(CompressionCore::compress(cv, block), expected);
     }
 
     #[test]
@@ -221,7 +219,7 @@ mod tests {
         let block = test_block();
         let expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
 
-        assert_eq!(BlakeG::compress_raw(cv, block), expected);
+        assert_eq!(CompressionCore::compress_raw(cv, block), expected);
     }
 
     #[test]
@@ -255,12 +253,12 @@ mod tests {
     fn compress_raw_xof_is_blake3_xof_with_fixed_iv_tail() {
         let cv = TEST_CV;
         let block = test_block();
-        let xof = BlakeG::compress_raw_xof(cv, block);
+        let xof = CompressionCore::compress_raw_xof(cv, block);
 
         // Low half is identical to the folded raw output.
-        assert_eq!(&xof[..8], &BlakeG::compress_raw(cv, block));
+        assert_eq!(&xof[..8], &CompressionCore::compress_raw(cv, block));
 
-        // Full 16 words match the BLAKE3 XOF reference with BlakeG's fixed IV tail.
+        // Full 16 words match the BLAKE3 XOF reference with Eidos's fixed IV tail.
         let expected = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         assert_eq!(xof, expected);
     }
@@ -269,11 +267,11 @@ mod tests {
     fn compress_raw_then_mask_matches_compress() {
         let cv = TEST_CV;
         let block = test_block();
-        let mut raw = BlakeG::compress_raw(cv, block);
+        let mut raw = CompressionCore::compress_raw(cv, block);
 
         apply_output_mask(&mut raw);
 
-        assert_eq!(raw, BlakeG::compress(cv, block));
+        assert_eq!(raw, CompressionCore::compress(cv, block));
     }
 
     #[test]
@@ -288,24 +286,24 @@ mod tests {
 
         mask_odd_lanes(&mut expected);
 
-        assert_eq!(BlakeG::compress(cv, block), expected);
+        assert_eq!(CompressionCore::compress(cv, block), expected);
     }
 
     #[test]
-    fn standard_blake3_compression_is_not_blakeg_mode() {
+    fn standard_blake3_compression_is_not_eidos_mode() {
         let cv = TEST_CV;
         let block = test_block();
         let mut standard = standard_blake3_compress(cv, block, 0, 64, 0);
 
         mask_odd_lanes(&mut standard);
 
-        assert_ne!(BlakeG::compress(cv, block), standard);
+        assert_ne!(CompressionCore::compress(cv, block), standard);
     }
 
     #[test]
     fn compress_output_lives_in_252_bit_subspace() {
         let block: [u32; 16] = core::array::from_fn(|i| i as u32 + 1);
-        let cv_new = BlakeG::compress(TEST_CV, block);
+        let cv_new = CompressionCore::compress(TEST_CV, block);
 
         assert_eq!(cv_new[1] & !ODD_LANE_MASK, 0, "cv_new[1] top bit must be 0");
         assert_eq!(cv_new[3] & !ODD_LANE_MASK, 0, "cv_new[3] top bit must be 0");
@@ -316,7 +314,10 @@ mod tests {
     #[test]
     fn compress_is_deterministic() {
         let block: [u32; 16] = core::array::from_fn(|i| i as u32);
-        assert_eq!(BlakeG::compress(TEST_CV, block), BlakeG::compress(TEST_CV, block));
+        assert_eq!(
+            CompressionCore::compress(TEST_CV, block),
+            CompressionCore::compress(TEST_CV, block)
+        );
     }
 
     #[test]
@@ -324,7 +325,10 @@ mod tests {
         let block_a = [0u32; 16];
         let mut block_b = [0u32; 16];
         block_b[0] = 1;
-        assert_ne!(BlakeG::compress(TEST_CV, block_a), BlakeG::compress(TEST_CV, block_b));
+        assert_ne!(
+            CompressionCore::compress(TEST_CV, block_a),
+            CompressionCore::compress(TEST_CV, block_b)
+        );
     }
 
     #[test]
@@ -332,7 +336,10 @@ mod tests {
         let mut cv_b = TEST_CV;
         cv_b[0] = 0;
         let block = [0u32; 16];
-        assert_ne!(BlakeG::compress(TEST_CV, block), BlakeG::compress(cv_b, block));
+        assert_ne!(
+            CompressionCore::compress(TEST_CV, block),
+            CompressionCore::compress(cv_b, block)
+        );
     }
 
     #[test]
@@ -354,10 +361,10 @@ mod tests {
             core::array::from_fn(|word| core::array::from_fn(|lane| cvs[lane][word]));
         let packed_block: [[u32; LANES]; 16] =
             core::array::from_fn(|word| core::array::from_fn(|lane| blocks[lane][word]));
-        let packed_out = BlakeG::compress_packed(packed_cv, packed_block);
+        let packed_out = CompressionCore::compress_packed(packed_cv, packed_block);
 
         for lane in 0..LANES {
-            let scalar = BlakeG::compress(cvs[lane], blocks[lane]);
+            let scalar = CompressionCore::compress(cvs[lane], blocks[lane]);
             let packed_lane: [u32; 8] = core::array::from_fn(|word| packed_out[word][lane]);
             assert_eq!(packed_lane, scalar);
         }
@@ -382,11 +389,11 @@ mod tests {
             core::array::from_fn(|word| core::array::from_fn(|lane| cvs[lane][word]));
         let packed_block: [[u32; LANES]; 16] =
             core::array::from_fn(|word| core::array::from_fn(|lane| blocks[lane][word]));
-        let portable = BlakeG::compress_packed(packed_cv, packed_block);
-        let native = BlakeG::compress_packed_native(packed_cv, packed_block);
+        let portable = CompressionCore::compress_packed(packed_cv, packed_block);
+        let native = CompressionCore::compress_packed_native(packed_cv, packed_block);
 
         for lane in 0..LANES {
-            let scalar = BlakeG::compress(cvs[lane], blocks[lane]);
+            let scalar = CompressionCore::compress(cvs[lane], blocks[lane]);
             let portable_lane: [u32; 8] = core::array::from_fn(|word| portable[word][lane]);
             let native_lane: [u32; 8] = core::array::from_fn(|word| native[word][lane]);
             assert_eq!(portable_lane, scalar);

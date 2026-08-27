@@ -109,8 +109,8 @@ impl ExecutionWitness {
 /// Current wire format version for [`ExecutionWitness`] serialization.
 ///
 /// The version is written as the first byte of every serialized witness. Deserialization only
-/// accepts this exact value, so a future format change only needs to add a new accepted version
-/// and keep the old readers where compatibility matters.
+/// accepts this exact value. Supporting another format requires an explicit decoder for its
+/// version byte.
 const EXECUTION_WITNESS_WIRE_VERSION: u8 = 2;
 
 impl Serializable for ExecutionWitness {
@@ -307,7 +307,7 @@ fn read_precompile_witness<R: ByteReader>(
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Per-AIR main traces for Core, Chiplets, BlakeG compression, and byte-pair lookup.
+/// - Per-AIR main traces for Core, Chiplets, Eidos compression, and byte-pair lookup.
 /// - Information about the program (program hash and the kernel).
 /// - Information about the initial and final stack states and authenticated precompile root.
 /// - Summary of trace lengths of the main trace components.
@@ -450,7 +450,7 @@ impl VmTrace {
     ///
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
-        let (core_matrix, chiplets_matrix, blakeg_compression_matrix, and8_lookup_matrix) =
+        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
             self.main_trace.to_air_matrices();
         let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
@@ -459,7 +459,7 @@ impl VmTrace {
                 .expect("statement construction failed");
         let prover_statement = ProverStatement::new(
             statement,
-            vec![core_matrix, chiplets_matrix, blakeg_compression_matrix, and8_lookup_matrix],
+            vec![core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix],
         )
         .expect("prover statement construction failed");
 

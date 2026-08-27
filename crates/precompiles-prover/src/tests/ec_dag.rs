@@ -315,7 +315,7 @@ fn eval_locally_holds(traces: &SessionTraces, eval_main: &RowMajorMatrix<Felt>) 
 #[should_panic(expected = "constraint not satisfied")]
 fn dag_pai_payload_must_be_true_true() {
     // A PAI VALUE node has no coordinate children. Its canonical payload is
-    // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both rate halves.
+    // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both block halves.
     let traces = ec_dag_pai_traces();
     let eval = crate::tests::transcript_eval_main(&traces);
     let row = first_row_with_flag(&eval, COL_IS_EC_PAI);

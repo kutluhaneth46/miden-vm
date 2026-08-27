@@ -325,13 +325,13 @@ pub(crate) trait MemoryInterface {
 
 /// Trait representing the hasher subsystem of the processor.
 pub(crate) trait HasherInterface {
-    /// Applies one BCOMPRESS request and records the digest-only hasher response.
+    /// Applies one COMPRESS request and records the chaining-value response.
     ///
-    /// The returned state has the 12-lane BlakeG shape. The hasher chiplet response carries the
-    /// new 4-felt chaining value from `state[8..12]`.
-    fn bcompress(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
+    /// The returned state has the 12-lane Eidos compression shape. The hasher chiplet response
+    /// carries the resulting 4-felt chaining value from `state[8..12]`.
+    fn compress(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
-    /// Applies one BlakeG compression and returns all 16 raw XOF lanes.
+    /// Applies one Eidos compression and returns all 16 raw XOF lanes.
     fn compress_aead_xof(
         &mut self,
         ctx: ContextId,

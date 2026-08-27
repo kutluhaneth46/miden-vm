@@ -14,7 +14,7 @@ use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_i
 const AIRS: [HandwrittenMidenAir; MIDEN_AIR_COUNT] = [
     HandwrittenMidenAir(MidenAir::Core),
     HandwrittenMidenAir(MidenAir::Chiplets),
-    HandwrittenMidenAir(MidenAir::BlakeGCompression),
+    HandwrittenMidenAir(MidenAir::EidosCompression),
     HandwrittenMidenAir(MidenAir::And8Lookup),
 ];
 

@@ -34,7 +34,7 @@ proptest! {
 
 /// The MASM `sys::vm::claim::claim_commitment` procedure must agree with the native
 /// `ExecutionClaim::commitment` on the same claim region (same encoding, same domain tag, same
-/// capacity layout).
+/// Eidos framing layout).
 #[test]
 fn masm_claim_commitment_matches_native() {
     use miden_core::{
@@ -99,17 +99,17 @@ fn masm_claim_commitment_matches_native() {
 }
 
 /// The MASM `eidos::hash_elements_in_domain` must agree with the native implementation for
-/// rate-aligned, unaligned, and empty inputs, exercising the kernel commitment's domain.
+/// block-aligned, unaligned, and empty inputs, exercising the kernel commitment's domain.
 #[test]
 fn hash_elements_in_domain_matches_native() {
     use miden_core::{Felt, chiplets::hasher};
 
-    let mut marked_rate_block = vec![0; 8];
-    marked_rate_block[0] = 1;
+    let mut marked_block = vec![0; 8];
+    marked_block[0] = 1;
     let cases = [
         vec![],
         vec![0; 8],
-        marked_rate_block,
+        marked_block,
         (1..=5).collect(),
         (1..=8).collect(),
         (1..=11).collect(),

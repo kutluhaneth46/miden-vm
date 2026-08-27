@@ -18,11 +18,11 @@ $$
 where $P_k$ is the fixed bus prefix for that semantic message kind. The separate prefixes prevent
 equal payloads from satisfying different relations.
 
-## BCOMPRESS
+## COMPRESS
 
-The `BCOMPRESS` operation applies one BlakeG compression to the top 12 stack elements, arranged as
+The `COMPRESS` operation applies one Eidos compression to the top 12 stack elements, arranged as
 `[BLOCK_LO, BLOCK_HI, CV]`. The 8-element message block is preserved and the 4-element chaining
-value is replaced with the compression digest:
+value is replaced with the updated chaining value:
 
 ```text
 Before: [BLOCK_LO, BLOCK_HI, CV,  ...]
@@ -30,10 +30,10 @@ After:  [BLOCK_LO, BLOCK_HI, CV', ...]
 ```
 
 The prover supplies the hasher-controller row address in helper register $h_0$. The controller row
-commits the input state and returned digest to one physical 32-row block in the standalone BlakeG
-compression AIR. The decoder removes both typed messages from the chiplet bus.
+commits the input state and returned chaining value to one physical 32-row block in the standalone
+Eidos compression AIR. The decoder removes both typed messages from the chiplet bus.
 
-For `BCOMPRESS`, define the input and output values as follows:
+For `COMPRESS`, define the input and output values as follows:
 
 $$
 v_{input} = H_{linear\_init}(h_0, 0, [s_0,\ldots,s_{11}])
@@ -53,7 +53,7 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
 The constraint enforces that the input state and returned chaining value occur together in the
-hasher controller and are backed by a valid BlakeG compression.
+hasher controller and are backed by a valid Eidos compression.
 
 The effect of this operation on the rest of the stack is:
 * **No change** in positions $0$ through $7$ and from position $12$ onward.
@@ -196,7 +196,7 @@ multiplicities. No canonical-index witness is stored in the native hash controll
 
 ## CRYPTOSTREAM
 
-`CRYPTOSTREAM` encrypts two words from memory using one BlakeG-XOF counter block. Its stack
+`CRYPTOSTREAM` encrypts two words from memory using one Eidos XOF counter block. Its stack
 transition is
 
 ```text
@@ -204,14 +204,14 @@ Before: [K_CTR(4), counter, src,   dst,    remaining, ...]
 After:  [K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]
 ```
 
-The BlakeG input is `[counter, 0, 0, 0, 0, 0, 0, 0, K_CTR]`. The raw XOF result supplies sixteen
+The Eidos compression input is `[counter, 0, 0, 0, 0, 0, 0, 0, K_CTR]`. The raw XOF result supplies sixteen
 u32 keystream lanes. Each of the eight plaintext field elements is unpacked into low and high u32
 limbs, XORed with the corresponding lanes byte by byte, and written as two field elements. This is
 why eight input elements advance `dst` by sixteen elements.
 
 The AIR binds three parts of the operation through typed LogUp relations:
 
-- the core row supplies the clock-tagged BlakeG-XOF input consumed by the compression trace;
+- the core row supplies the clock-tagged Eidos XOF input consumed by the compression trace;
 - two 8-row AEAD-stream trace entries prove the two four-element source reads and four
   two-element destination writes;
 - the And8 lookup table proves every byte-level XOR used to form the expanded ciphertext limbs.
@@ -409,21 +409,22 @@ $$
 
 The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as one Eidos
-compression under the registered deferred-AND domain:
-`ROOT_NEW = Eidos::compress_block(DEFERRED_ROOT_DOMAIN, ROOT_PREV || STMNT)`. The VM STARK
+compression using the fixed chaining value derived from the registered deferred-AND domain:
+`ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`. The VM STARK
 authenticates the final root as one public value.
 
 ### Operation Overview
 
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
-4..8 (the second BlakeG block word). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
-opcode entry. `STMNT` must already be present in the processor's deferred state and evaluate to
-`TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and precompile
-support code wrap this low-level opcode by registering nodes and logging statement digests.
+4..8 (the second Eidos compression block word). Stack slots 0..4 and 8..12 are unreferenced by any
+constraint on opcode entry. `STMNT` must already be present in the processor's deferred state and
+evaluate to `TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and
+precompile support code wrap this low-level opcode by registering nodes and logging statement
+digests.
 
 Additionally, the processor maintains a persistent rolling deferred root that is updated with each
 `LOG_DEFERRED` invocation. The previous root is provided non‑deterministically via helper
-registers and is denoted `ROOT_PREV`. The hasher bus links the constrained BlakeG compression to
+registers and is denoted `ROOT_PREV`. The hasher bus links the constrained Eidos compression to
 the stack transition, while the deferred state enforces that the logged statement evaluates to
 `TRUE`.
 
@@ -434,7 +435,8 @@ Before:  [_,        STMNT, _, ...]
 After:   [ROOT_NEW, STMNT, _, ...]
 ```
 
-`STMNT` placement in the second block word lets its lookup encoding share BlakeG message products.
+`STMNT` placement in the second block word lets its lookup encoding share Eidos compression message
+products.
 Only stack slots 0..4 are replaced with `ROOT_NEW`; the statement and the remaining stack slots are
 preserved. Wrappers usually drop the three temporary words after the opcode.
 
@@ -457,22 +459,22 @@ $$
 \begin{aligned}
 \mathsf{ROOT}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
 \mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-\mathsf{CV}_i                  &= \mathsf{DEFERRED\_ROOT\_DOMAIN}_i
+\mathsf{CV}_i                  &= \mathsf{DEFERRED\_AND\_INIT\_CV}_i
 &&\text{(registered Eidos chaining value)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message reduces the BlakeG state in the canonical order
-`[ROOT_PREV, STMNT, DEFERRED_ROOT_DOMAIN]`:
+The input message reduces the Eidos compression state in the canonical order
+`[ROOT_PREV, STMNT, DEFERRED_AND_INIT_CV]`:
 
 $$
 v_{\text{input}} = H_{linear\_init}(h_0, 0,
 [\mathsf{ROOT}^{\text{prev}}, \mathsf{STMNT}, \mathsf{CV}]).
 $$
 
-The same one-row controller entry returns the digest with a typed return message. Denote the stack
-after the instruction by $s'_i$:
+The same one-row controller entry returns the updated chaining word with a typed return message.
+Denote the stack after the instruction by $s'_i$:
 
 $$
 \mathsf{ROOT}^{\text{new}}_i = s'_{i}
@@ -492,7 +494,7 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
 The constraint enforces that both messages occur on one hasher-controller row backed by the same
-physical BlakeG compression cycle.
+physical Eidos compression cycle.
 
 
 
@@ -537,6 +539,6 @@ $$
 v_{rem,last} = D(\mathsf{ROOT\_FINAL}).
 $$
 
-Because the domain-separated Eidos compression outputs a digest word directly, the deferred root is
-itself the digest at every step. The final deferred root is a fixed four-field-element value
-committed by `VmProof`, not a variable-length request transcript.
+Because this compression uses the domain-derived `DEFERRED_AND_INIT_CV` and outputs an updated chaining
+word directly, that word is the deferred root at every step. The final deferred root is a fixed
+four-field-element value committed by `VmProof`, not a variable-length request transcript.

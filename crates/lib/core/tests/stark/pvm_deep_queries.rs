@@ -64,7 +64,7 @@ fn add_path(
 fn lmcs_leaf(row: &[Felt]) -> Word {
     assert_eq!(row.len() % 8, 0, "synthetic LMCS row must be block-aligned");
     row.chunks_exact(8).fold(Eidos::init_chaining_word(0, 0), |cv, block| {
-        Eidos::compress_block(cv, block.try_into().expect("eight-felt LMCS block"))
+        Eidos::compress(cv, block.try_into().expect("eight-felt LMCS block"))
     })
 }
 

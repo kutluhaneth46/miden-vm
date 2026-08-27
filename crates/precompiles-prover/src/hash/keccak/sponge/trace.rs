@@ -142,8 +142,8 @@ impl SpongeSeqId {
 
 /// What a `SpongeRequires::require` call returns: the Keccak digest
 /// of this invocation, the chunk-content Eidos digest, the chunk-content
-/// Eidos absorption span (so the Keccak-node layer can read OutRate0 at
-/// its tail), the invocation's sponge-row head, and its chunk-chain
+/// Eidos absorption span (so the Keccak-node layer can consume the terminal
+/// `EidosOut` value at its tail), the invocation's sponge-row head, and its chunk-chain
 /// head. Empty input still lays one canonical zero chunk, so the span
 /// is non-empty and `chunk_content_digest` binds that chunk's Eidos
 /// digest.

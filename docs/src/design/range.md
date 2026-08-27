@@ -7,7 +7,7 @@ sidebar_position: 4
 
 Miden VM proves that selected field elements are 16-bit integers through a typed LogUp relation.
 There is no separate range-checker execution-trace component. The table side is part of the fixed
-byte-pair lookup AIR that also supports byte AND and the byte rotations used by BlakeG.
+byte-pair lookup AIR that also supports byte AND and the byte rotations used by Eidos compression.
 
 ## Fixed byte-pair table
 
@@ -18,7 +18,7 @@ $$
 r = 256a + b.
 $$
 
-The same row provides $a \mathbin{\&} b$ and the position-specific BlakeG rotation
+The same row provides $a \mathbin{\&} b$ and the position-specific Eidos compression rotation
 contributions. For range checking, the row represents the 16-bit value $v = 256a + b$.
 
 The main trace contains one dynamic range multiplicity $m_v$ for every fixed row. A request to
@@ -48,7 +48,7 @@ Range-check requests currently come from:
   $y_0, y_1, y_2, y_3$ of its canonical-index helper and for $2y_3$;
 - the memory chiplet, which requests five checks for sorted-access deltas and address limbs on each
   active row; and
-- the BlakeG compression AIR, which range-checks fused message/output limbs.
+- the Eidos compression AIR, which range-checks fused message/output limbs.
 
 On an `MPVERIFY` or `MRUPDATE` row, the six Core helpers are `[addr, b, y0, y1, y2, y3]`.
 `CoreAir` enforces booleanity of $b$ and
@@ -63,13 +63,13 @@ direction bit derived by the hash controller. Range-checking the four limbs and 
 $y < 2^{63}$ and rules out a wrapped 64-bit path index. These requests are replayed through
 existing Core lookup columns: the low three limbs use the stack-overflow column, while the top-limb,
 doubled-top-limb, depth, and scaled-depth requests are split between the chiplet-request and
-block-stack/range/log-deferred columns. No hasher-controller capacity cells are used. See
+block-stack/range/log-deferred columns. No hasher-controller chaining-value cells are used. See
 [Merkle range checks](./stack/crypto_ops.md#merkle-range-checks) for the exact packing.
 
 The trace builder collects these counts deterministically and writes them into the range
 multiplicity column of `And8LookupAir`. The relation uses its own bus identifier, so range-check
-messages cannot cancel byte-AND or BlakeG-rotation messages even though they share the same fixed
-rows.
+messages cannot cancel byte-AND or Eidos compression rotation messages even though they share the
+same fixed rows.
 
 ## Communication bus
 
@@ -112,5 +112,5 @@ $b_{\mathrm{range}}$ value be zero.
 
 The table height is always $2^{16}$ and is independent of VM program length. Its eleven
 preprocessed columns are commitment-cached, while its ten main columns contain only dynamic
-multiplicities. This fixed AIR replaces the former variable-height, bridge-row range-checker and
-also supplies the byte operations required by the native BlakeG compression AIR.
+multiplicities. The table supplies both 16-bit range checks and the byte operations required by the
+native Eidos compression AIR.

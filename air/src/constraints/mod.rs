@@ -15,11 +15,11 @@ use chiplets::selectors::ChipletSelectors;
 use crate::{ChipletCols, CoreCols, MidenAirBuilder};
 
 pub mod and8_lookup;
-pub mod blakeg_compression;
 pub mod chiplets;
 pub mod columns;
 pub mod constants;
 pub mod decoder;
+pub mod eidos_compression;
 pub mod ext_field;
 pub mod generated;
 pub mod lookup;

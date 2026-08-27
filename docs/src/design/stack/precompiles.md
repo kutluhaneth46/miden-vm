@@ -48,8 +48,8 @@ modules are currently internal implementation detail used by core-library facade
    bundled hydration can re-evaluate before precompile proving.
 4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
    `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. One constrained
-   BlakeG compression computes
-   `ROOT_NEW = Eidos::compress_block(DEFERRED_ROOT_DOMAIN, ROOT_PREV || STMNT)`, and host-side
+   Eidos compression computes
+   `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
    deferred state records the corresponding `AND` node.
 
 ## Responsibilities

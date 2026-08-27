@@ -140,10 +140,10 @@ mod tests {
     use super::*;
     use crate::{config::pcs_params, trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT};
 
-    /// Pinned bytes/row figures for the current AIR shape: Core, Chiplets, BlakeG, and And8 have
-    /// 49/24/108/10 main columns, 4/4/20/10 extension-field auxiliary columns, and quotient
-    /// degrees 8/8/2/1 respectively, with blowup 8. A width, auxiliary-width, or quotient-degree
-    /// change must break this test loudly rather than silently drift the model.
+    /// Pinned bytes/row figures for the current AIR shape: Core, Chiplets, EidosCompression, and
+    /// And8 have 49/24/108/10 main columns, 4/4/20/10 extension-field auxiliary columns, and
+    /// quotient degrees 8/8/2/1 respectively, with blowup 8. A width, auxiliary-width, or
+    /// quotient-degree change must break this test loudly rather than silently drift the model.
     #[test]
     fn pinned_bytes_for_current_air_shape() {
         let params = pcs_params();
@@ -153,7 +153,7 @@ mod tests {
             [
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::BlakeGCompression,
+                MidenAir::EidosCompression,
                 MidenAir::And8Lookup,
             ]
         );
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(
             prover_peak_bytes(&[0, 0, 1, 0], &params),
             Some(16520),
-            "BlakeGCompression alone"
+            "EidosCompression alone"
         );
         assert_eq!(prover_peak_bytes(&[0, 0, 0, 1], &params), Some(5900), "And8Lookup alone");
         assert_eq!(prover_peak_bytes(&[1, 1, 1, 1], &params), Some(27230), "all four at height 1");

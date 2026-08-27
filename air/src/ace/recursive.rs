@@ -69,7 +69,7 @@ pub struct RecursiveAceCircuit {
 /// order-specific circuits. Use this over [`build_recursive_verifier_ace_circuit`] whenever more
 /// than one order is needed so registry construction does not rebuild the composition per leaf.
 pub struct RecursiveAceCircuitFactory {
-    /// The generic factory owns all order-invariant caching (post-constants sponge
+    /// The generic factory owns all order-invariant caching (post-constants chaining
     /// state, common-section digest) and the construction cross-checks; this type only
     /// maps [`ProofOrder`]s onto instance-index permutations.
     inner: FactoredCircuitFactory<QuadFelt>,

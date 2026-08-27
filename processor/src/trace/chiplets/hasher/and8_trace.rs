@@ -9,7 +9,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, PrimeField64},
 };
 
-/// Builds the dynamic byte-pair lookup trace from accumulated BlakeG and stream counts.
+/// Builds the dynamic byte-pair lookup trace from accumulated Eidos compression and stream counts.
 pub(crate) fn build_and8_lookup_trace(counts: &[u64]) -> Vec<Felt> {
     debug_assert_eq!(counts.len(), BYTE_LOOKUP_COUNT_LEN);
     let mut trace = Felt::zero_vec(AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS);

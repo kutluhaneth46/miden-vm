@@ -13,13 +13,13 @@
 //!    chiplet — bundles the chunk chain's two foreign keys.
 //! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round chiplet's perm-N
 //!    digest-output addresses, mult 2 (matching the round chiplet's `dst_mult`).
-//! 4. Drives one Eidos perm to hash `D[8 felts]` (rate0 = lanes 0-1, rate1 = lanes 2-3) under VM
-//!    `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
+//! 4. Drives one framed Eidos compression chain to hash `D[8 felts]` (block low = lanes 0-1, block
+//!    high = lanes 2-3) under VM `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
 //! 5. Reads `H_input_chunks` from `EidosOut` at `absorption_id_chunks + n_chunks − 1` — the chunks
 //!    chain tail.
-//! 6. Drives a second Eidos perm over `[H_input_chunks | H_digest_chunks]` (rate0 = H_input_chunks,
-//!    rate1 = H_digest_chunks) under the VM Keccak-256 assertion tag `[Keccak256Precompile::id(),
-//!    0, len_bytes, 0]` → `H_keccak`.
+//! 6. Drives a second framed Eidos compression chain over `[H_input_chunks | H_digest_chunks]`
+//!    (block low = H_input_chunks, block high = H_digest_chunks) under the VM Keccak-256 assertion
+//!    tag `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
@@ -101,11 +101,11 @@ pub const COL_N_CHUNKS: usize = 4;
 /// so successive rows' `absorption_id_chunks` values can have gaps.
 pub const COL_ABSORPTION_ID_CHUNKS: usize = 5;
 /// Invocation byte length. Pinned by the `KeccakSponge` provide.
-/// Folded into the Keccak-node hash's `param_a` cap slot.
+/// Folded into the Keccak-node hash's `param_a` chain-context slot.
 pub const COL_LEN_BYTES: usize = 6;
 
 /// Eidos cycle used internally to hash `D` as a semantic one-chunk payload.
-/// Free witness; Eidos-bus balance pins it to a Eidos chiplet cycle running a
+/// Free witness; Eidos-bus balance pins it to an Eidos chiplet cycle running a
 /// 1-block absorption.
 pub const COL_ABSORPTION_ID_DIGEST_CHUNKS: usize = 7;
 /// Eidos cycle used internally to hash `[H_input_chunks | H_digest_chunks]`
@@ -115,8 +115,8 @@ pub const COL_ABSORPTION_ID_KECCAK: usize = 8;
 
 /// First of the 8 Keccak-digest content felts, laid out as
 /// `[lo_0, hi_0, lo_1, hi_1, lo_2, hi_2, lo_3, hi_3]`. Lane `j` is
-/// `(D[2j], D[2j+1])` on Memory64; `rate0 = D[0..4]` (lanes 0-1),
-/// `rate1 = D[4..8]` (lanes 2-3) on the digest-chunks Eidos perm.
+/// `(D[2j], D[2j+1])` on Memory64. The digest-chunks Eidos compression uses
+/// `block_lo = D[0..4]` (lanes 0-1) and `block_hi = D[4..8]` (lanes 2-3).
 pub const COL_D_BEGIN: usize = 9;
 /// Number of digest-content felts.
 pub const NUM_D: usize = 8;
@@ -127,18 +127,18 @@ pub const COL_D_END: usize = COL_D_BEGIN + NUM_D;
 pub const NUM_HASH: usize = 4;
 
 /// First felt of the input chunks-chain digest read out of `EidosOut`
-/// at `absorption_id_chunks + n_chunks − 1`. Feeds the keccak-node Eidos perm
-/// as `rate0`.
+/// at `absorption_id_chunks + n_chunks − 1`. Feeds the first block word of the
+/// Keccak-node Eidos compression.
 pub const COL_H_INPUT_CHUNKS_BEGIN: usize = COL_D_END;
 pub const COL_H_INPUT_CHUNKS_END: usize = COL_H_INPUT_CHUNKS_BEGIN + NUM_HASH;
 
-/// First felt of the digest-chunks hash (output of the digest-chunks Eidos
-/// perm). Read from `EidosOut` at `absorption_id_digest_chunks`. Feeds
-/// the keccak-node Eidos perm as `rate1`.
+/// First felt of the digest-chunks hash (output of the digest-chunks Eidos chain). Read from
+/// `EidosOut` at `absorption_id_digest_chunks`. Feeds the second block word of the Keccak-node
+/// Eidos compression.
 pub const COL_H_DIGEST_CHUNKS_BEGIN: usize = COL_H_INPUT_CHUNKS_END;
 pub const COL_H_DIGEST_CHUNKS_END: usize = COL_H_DIGEST_CHUNKS_BEGIN + NUM_HASH;
 
-/// First felt of the Keccak-node hash (output of the keccak Eidos perm).
+/// First felt of the Keccak-node hash (output of the framed Eidos compression chain).
 /// Read from `EidosOut` at `absorption_id_keccak`; provided as the
 /// `h` key of `Binding(H_keccak, True, 0, 0)`.
 pub const COL_H_KECCAK_BEGIN: usize = COL_H_DIGEST_CHUNKS_END;
@@ -354,9 +354,9 @@ where
             + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
             - LB::Expr::from(Felt::from(128u8));
 
-        // Capacities.
-        let cap_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
-        let cap_keccak = [
+        // Eidos chain contexts.
+        let chain_context_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
+        let chain_context_keccak = [
             LB::Expr::from(Keccak256Precompile::id()),
             LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
             len_bytes.clone(),
@@ -486,7 +486,7 @@ where
                 EidosChainInputMsg::chunks(
                     absorption_id_digest_chunks.clone(),
                     d,
-                    cap_digest_chunks,
+                    chain_context_digest_chunks,
                 ),
                 interaction_deg
             ),
@@ -511,14 +511,14 @@ where
                 pos_act.clone(),
                 EidosChainInputMsg::node(
                     absorption_id_keccak.clone(),
-                    core::array::from_fn(|idx| {
+                    array::from_fn(|idx| {
                         if idx < 4 {
                             h_input_chunks[idx].clone()
                         } else {
                             h_digest_chunks[idx - 4].clone()
                         }
                     }),
-                    cap_keccak,
+                    chain_context_keccak,
                 ),
                 interaction_deg
             ),

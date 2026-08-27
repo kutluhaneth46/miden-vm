@@ -5,31 +5,31 @@ sidebar_position: 2
 
 # Hash chiplet
 
-The Miden VM hasher uses Eidos framing and BlakeG compression. Its protocol is split across four
+The Miden VM hasher uses Eidos framing and Eidos compression. Its protocol is split across four
 AIRs:
 
-- `CoreAir` issues native operations such as `bcompress` and `log_deferred`;
-- `ChipletsAir` records one semantic controller row for each BlakeG compression request;
-- `BlakeGCompressionAir` proves the 32-row compression computation;
-- `And8LookupAir` supplies the fixed byte table used by BlakeG XORs and rotations.
+- `CoreAir` issues native operations such as `compress` and `log_deferred`;
+- `ChipletsAir` records one semantic controller row for each Eidos compression request;
+- `EidosCompressionAir` proves the 32-row compression computation;
+- `And8LookupAir` supplies the fixed byte table used by Eidos compression XORs and rotations.
 
 This keeps control-flow, Merkle, and sequential-hash semantics in the controller while isolating
 the wide compression computation. Identical compression inputs may be deduplicated: controller
-rows retain unit multiplicity, and one physical BlakeG cycle carries their aggregate provider
+rows retain unit multiplicity, and one physical Eidos compression cycle carries their aggregate provider
 multiplicity.
 
 ## Supported operations
 
 The controller handles:
 
-- native `BCOMPRESS` requests;
+- native `COMPRESS` requests;
 - Eidos two-to-one hashes for MAST and Merkle nodes;
 - sequential hashing over one or more 8-felt blocks;
 - Merkle path verification;
 - Merkle root updates;
 - the Eidos compression used by `LOG_DEFERRED`.
 
-AEAD `CRYPTOSTREAM` also uses `BlakeGCompressionAir`, but selects its XOF mode and connects through
+AEAD `CRYPTOSTREAM` also uses `EidosCompressionAir`, but selects its XOF mode and connects through
 clock-tagged AEAD input/output relations rather than an ordinary controller compression link.
 
 ## Chiplet selector prefix
@@ -106,18 +106,18 @@ store a canonical-index witness. See
 Only controller rows expose ordinary hasher semantics to the decoder and stack. The wide AIR is an
 internal computation provider connected by lookup arguments.
 
-## BlakeG compression AIR
+## Eidos compression AIR
 
-`BlakeGCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row block per
+`EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row block per
 physical compression:
 
 | Rows | Role |
 | ---- | ---- |
-| 0–27 | Seven BlakeG rounds, represented as 28 fused G-function rows |
-| 28–31 | Footer rows assembling the message, input chaining value, digest, XOF lanes, and external relations |
+| 0–27 | Seven Eidos compression rounds, represented as 28 fused G-function rows |
+| 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
 
 This is the MVM layout. The PVM has an independent Eidos transcript AIR: it uses the same
-108-column BlakeG compression layout plus 20 transcript/interface columns, for 128 main columns
+108-column Eidos compression layout plus 20 transcript/interface columns, for 128 main columns
 and 20 auxiliary columns in total.
 
 Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
@@ -157,7 +157,7 @@ to one physical cycle, while the footer-3 compression-link relation ties that cy
 
 ## Byte lookups and the And8 AIR
 
-BlakeG represents its u32 logic with byte-level lookup messages:
+The Eidos compression AIR represents its u32 logic with byte-level lookup messages:
 
 - ordinary bytewise AND, from which XOR is reconstructed as `a + b - 2*(a & b)`;
 - weighted byte contributions for rotate-right-by-12;
@@ -173,17 +173,18 @@ The hasher participates in four classes of lookup relations.
 
 ### Chiplets bus
 
-Typed hasher messages connect controller rows to the decoder and stack. They cover full BlakeG
-inputs, rate-only sequential absorptions, Merkle leaf inputs, and returned digest words.
+Typed hasher messages connect controller rows to the decoder and stack. They cover full Eidos
+compression inputs, next-block sequential absorptions, Merkle leaf inputs, completed hash digests,
+and updated chaining values from raw compression.
 
 ### Compression link
 
 The shared `v_wiring` column links each non-padding controller row to
-`BlakeGCompressionAir`. A hash row contributes `[block(8), cv_in(4), cv_out(4)]`; a Merkle row
+`EidosCompressionAir`. A hash row contributes `[block(8), cv_in(4), cv_out(4)]`; a Merkle row
 contributes the same tuple with the fixed Eidos two-to-one chaining value. Footer row 3 of the
 matching physical compression receives the tuple with its provider multiplicity.
 
-### Internal BlakeG buses
+### Internal Eidos compression buses
 
 Cycle-tagged relations connect fused computation rows to footer reconstruction for the message and
 input chaining value. Separate byte-table relations prove XOR, rotation, and range witnesses.
@@ -199,7 +200,7 @@ update can balance.
 The MVM instance order is protocol-pinned as:
 
 ```text
-[Core, Chiplets, BlakeGCompression, And8Lookup]
+[Core, Chiplets, EidosCompression, And8Lookup]
 ```
 
 Proof commitments are sorted by trace height, with instance order as the tie-breaker. The recursive
@@ -214,17 +215,17 @@ verifier selects the corresponding generated constraint circuit by the proof-ord
   routing.
 - `air/src/constraints/chiplets/hasher_control/flags.rs`
   Named row-kind flags derived from the controller-internal selectors.
-- `air/src/constraints/blakeg_compression/`
+- `air/src/constraints/eidos_compression/`
   32-row layout, schedule, selectors, constraints, lookup plan, and trace writer.
 - `air/src/constraints/and8_lookup/`
-  Fixed byte-table AIR used by BlakeG and AEAD stream XORs.
+  Fixed byte-table AIR used by Eidos compression and AEAD stream XORs.
 - `air/src/constraints/lookup/buses/chiplet_requests.rs`
   Decoder/stack requests for native hashing, Merkle operations, canonical-index range checks, AEAD
   stream, and deferred logging.
 - `air/src/constraints/lookup/buses/chiplet_responses.rs`
   Controller, bytewise, memory, ACE, and kernel-ROM provider messages.
 - `air/src/constraints/lookup/buses/wiring.rs`
-  Controller-to-BlakeG compression link and AEAD XOF output wiring.
+  Controller-to-Eidos compression link and AEAD XOF output wiring.
 - `processor/src/trace/chiplets/hasher/`
   Controller trace generation, request deduplication, canonical physical IDs, and 32-row block
   materialization.

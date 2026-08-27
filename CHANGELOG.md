@@ -24,16 +24,16 @@
 
 #### Changes
 
-- [BREAKING] Replaced the VM-native Poseidon2 permutation with Eidos, using one 32-row BlakeG compression cycle per native hash-controller row. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and recursive-verifier commitments and digests are not compatible with earlier releases. The optional Poseidon2 STARK proof-hash configuration remains supported.
-- [BREAKING] Replaced `HPERM` with `BCOMPRESS`, re-specified `CRYPTOSTREAM` and `LOG_DEFERRED`
-  for the Eidos-native protocol, renamed `adv.insert_hperm` to `adv.insert_bcompress`, renamed
+- [BREAKING] Replaced the VM-native Poseidon2 permutation with Eidos, using one 32-row Eidos compression cycle per native hash-controller row. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and recursive-verifier commitments and digests are not compatible with earlier releases. The optional Poseidon2 STARK proof-hash configuration remains supported.
+- [BREAKING] Replaced `HPERM` with `COMPRESS`, re-specified `CRYPTOSTREAM` and `LOG_DEFERRED`
+  for the Eidos-native protocol, renamed `adv.insert_hperm` to `adv.insert_compress`, renamed
   Falcon-Poseidon2 APIs to Falcon-Eidos, and replaced the legacy AEAD library with
-  `aead_blakeg`. MAST serialization is now version 5 so forests containing the former opcode
+  `aead_eidos`. MAST serialization is now version 5 so forests containing the former opcode
   encoding are rejected instead of being reinterpreted.
 - [BREAKING] Changed the Miden proof statement from three AIRs to four: Core, Chiplets, the
-  standalone BlakeG compression AIR, and the fixed And8 lookup AIR. The former range-checker AIR
+  standalone Eidos compression AIR, and the fixed And8 lookup AIR. The former range-checker AIR
   was removed; 16-bit range checks now use the fixed byte-pair table in the And8 AIR. The
-  precompile VM remains a ten-AIR statement and now uses its own 32-row BlakeG compression AIR.
+  precompile VM remains a ten-AIR statement and now uses its own 32-row Eidos compression AIR.
 - Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).

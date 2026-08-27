@@ -1,7 +1,9 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::chiplets::hasher::{Hasher, MAX_MERKLE_DEPTH, STATE_WIDTH};
-use miden_core::{chiplets::blakeg, crypto::merkle::MerklePath, deferred::DEFERRED_ROOT_DOMAIN};
+use miden_core::{
+    chiplets::eidos_compression, crypto::merkle::MerklePath, deferred::DEFERRED_AND_INIT_CV,
+};
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
@@ -24,7 +26,7 @@ mod tests;
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
-/// Reads the 12-element BlakeG state window from the top of the stack.
+/// Reads the 12-element Eidos compression state window from the top of the stack.
 #[inline(always)]
 fn read_hasher_state<P: Processor>(processor: &P) -> [Felt; STATE_WIDTH] {
     let double_word: [Felt; 8] = processor.stack().get_double_word(0);
@@ -45,24 +47,24 @@ fn read_hasher_state<P: Processor>(processor: &P) -> [Felt; STATE_WIDTH] {
     ]
 }
 
-/// Applies one BlakeG compression and writes only the next chaining value.
+/// Applies one Eidos compression and writes only the next chaining value.
 ///
 /// Stack transition: `[block(8), cv(4), ...] -> [block(8), cv'(4), ...]`.
 #[inline(always)]
-pub(super) fn op_bcompress<P: Processor, T: Tracer>(
+pub(super) fn op_compress<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let input_state = read_hasher_state(processor);
-    let (addr, output_state) = processor.hasher().bcompress(input_state)?;
+    let (addr, output_state) = processor.hasher().compress(input_state)?;
 
-    let cv_next: Word = output_state[Hasher::DIGEST_RANGE]
+    let cv_next: Word = output_state[Hasher::CV_RANGE]
         .try_into()
-        .expect("digest slice has length 4");
+        .expect("chaining-value slice has length 4");
     processor.stack_mut().set_word(8, &cv_next);
 
-    tracer.record_hasher_bcompress(input_state, output_state);
-    Ok(OperationHelperRegisters::BCompress { addr })
+    tracer.record_hasher_compress(input_state, output_state);
+    Ok(OperationHelperRegisters::Compress { addr })
 }
 
 /// Rejects Merkle depths outside the VM's supported range.
@@ -478,12 +480,11 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 /// Stack transition:
 /// `[_, STMNT, ...] -> [STATE_NEW, STMNT, ...]`
 ///
-/// - Hasher computes `merge(STATE_PREV, STMNT)` with the Eidos two-to-one chaining value;
-///   `STATE_NEW` is the digest word of the output.
+/// - Hasher computes `Eidos::compress(DEFERRED_AND_INIT_CV, STATE_PREV || STMNT)`; `STATE_NEW` is
+///   the output chaining value.
 /// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
 ///   helper registers.
-/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with
-///   BCOMPRESS.
+/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with COMPRESS.
 #[inline(always)]
 pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -492,21 +493,21 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     let statement_digest: Word = processor.stack().get_word(4);
     let state_prev = processor.system().deferred_root();
 
-    // Hasher input: [STATE_PREV, STMNT, Eidos merge CV].
+    // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[Hasher::RATE0_RANGE].copy_from_slice(state_prev.as_slice());
-    hasher_state[Hasher::RATE1_RANGE].copy_from_slice(statement_digest.as_slice());
-    hasher_state[Hasher::CAPACITY_RANGE].copy_from_slice(DEFERRED_ROOT_DOMAIN.as_slice());
+    hasher_state[Hasher::BLOCK_LO_RANGE].copy_from_slice(state_prev.as_slice());
+    hasher_state[Hasher::BLOCK_HI_RANGE].copy_from_slice(statement_digest.as_slice());
+    hasher_state[Hasher::CV_RANGE].copy_from_slice(DEFERRED_AND_INIT_CV.as_slice());
 
-    let (addr, output_state) = processor.hasher().bcompress(hasher_state)?;
+    let (addr, output_state) = processor.hasher().compress(hasher_state)?;
 
-    let state_new: Word = output_state[Hasher::DIGEST_RANGE].try_into().unwrap();
+    let state_new: Word = output_state[Hasher::CV_RANGE].try_into().unwrap();
 
     processor.system_mut().log_deferred_statement(statement_digest, state_new)?;
 
     processor.stack_mut().set_word(0, &state_new);
 
-    tracer.record_hasher_bcompress(hasher_state, output_state);
+    tracer.record_hasher_compress(hasher_state, output_state);
 
     Ok(OperationHelperRegisters::LogDeferred { addr, state_prev })
 }
@@ -561,7 +562,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
     }
 }
 
-/// Encrypts two memory words with a BlakeG-XOF keystream.
+/// Encrypts two memory words with an Eidos XOF keystream.
 ///
 /// Stack transition:
 /// `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]`
@@ -606,7 +607,7 @@ pub(super) fn op_aead_stream<P: Processor, T: Tracer>(
 
     let mut ciphertext = [ZERO; 16];
     for i in 0..8 {
-        let (lo, hi) = blakeg::unpack(plaintext[i / 4][i % 4]);
+        let (lo, hi) = eidos_compression::unpack(plaintext[i / 4][i % 4]);
         ciphertext[2 * i] = Felt::from_u32(lo ^ keystream[2 * i].as_canonical_u64() as u32);
         ciphertext[2 * i + 1] = Felt::from_u32(hi ^ keystream[2 * i + 1].as_canonical_u64() as u32);
     }

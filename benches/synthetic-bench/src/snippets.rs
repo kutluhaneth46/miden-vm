@@ -3,9 +3,9 @@
 //! The patterns are deliberately few and natural -- they mirror work a real transaction does,
 //! rather than one synthetic op per chiplet:
 //!
-//! - **hasher** drives the BlakeG compression AIR via repeated `bcompress`. The state evolves
-//!   between iterations (one `padw padw padw` as setup, no reset), so each compression has a
-//!   distinct input and the BlakeG multiplicity column does not collapse them.
+//! - **eidos_compression** drives the Eidos compression AIR via repeated `compress`. The state
+//!   evolves between iterations (one `padw padw padw` as setup, no reset), so each compression has
+//!   a distinct input and the compression multiplicity column does not collapse them.
 //! - **bitwise** drives the bitwise chiplet via `u32split + u32xor`.
 //! - **memory** drives the memory chiplet. The address advances by `4 * 65537 = 262148` per iter so
 //!   the accessed word changes on every iteration.
@@ -16,15 +16,16 @@
 //! wrapped in a `repeat.N ... end` block. The body must leave stack depth unchanged -- the repeat
 //! block would otherwise drift the stack each iteration.
 //!
-//! Note: decoder-only programs still incur hasher rows due to MAST hashing, so low hasher targets
-//! may be unreachable; the solver clamps `hasher` iterations to zero in that case.
+//! Note: decoder-only programs still incur Eidos compression rows due to MAST hashing, so low
+//! compression targets may be unreachable; the solver clamps `eidos_compression` iterations to
+//! zero in that case.
 
 /// A VM component the solver targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Component {
     /// System + decoder + stack.
     Core,
-    Hasher,
+    EidosCompression,
     /// Total chiplets trace. The bitwise snippet is the adjustable filler for this hard bracket.
     Chiplets,
     /// Advisory memory composition.
@@ -49,11 +50,11 @@ pub struct Snippet {
 /// targets, `decoder_pad` last so it absorbs leftover main-trace budget.
 pub const SNIPPETS: &[Snippet] = &[
     Snippet {
-        name: "hasher",
+        name: "eidos_compression",
         setup: "padw padw padw",
-        body: "bcompress",
+        body: "compress",
         cleanup: "dropw dropw dropw",
-        dominant: Component::Hasher,
+        dominant: Component::EidosCompression,
     },
     Snippet {
         name: "bitwise",
@@ -136,7 +137,12 @@ mod tests {
 
     #[test]
     fn catalog_has_one_snippet_per_solver_component() {
-        let targets = [Component::Core, Component::Hasher, Component::Chiplets, Component::Memory];
+        let targets = [
+            Component::Core,
+            Component::EidosCompression,
+            Component::Chiplets,
+            Component::Memory,
+        ];
         for target in targets {
             let count = SNIPPETS.iter().filter(|s| s.dominant == target).count();
             assert_eq!(count, 1, "expected exactly one snippet for {target:?}");
@@ -174,7 +180,7 @@ mod tests {
 
     #[test]
     fn render_with_zero_iters_still_emits_setup_and_cleanup() {
-        let snippet = find("hasher").expect("hasher snippet");
+        let snippet = find("eidos_compression").expect("Eidos compression snippet");
         let out = render(snippet, 0);
         assert!(out.contains("padw padw padw"));
         assert!(out.contains("dropw dropw dropw"));

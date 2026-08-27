@@ -44,7 +44,7 @@ use crate::{
         rpo_config, rpx_config, test_challenger,
     },
     transcript::{
-        eidos::{BlakeGCompressionAir, EidosDigest},
+        eidos::{EidosCompressionAir, EidosDigest},
         eval::TranscriptEvalAir,
     },
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
@@ -56,7 +56,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChipletAir {
     ChunkNodeSponge,
-    BlakeGCompression,
+    EidosCompression,
     KeccakRound,
     BytePairAnd8,
     TranscriptEval,
@@ -71,7 +71,7 @@ macro_rules! delegate {
     ($self:ident, $method:ident $(, $arg:expr)*) => {
         match $self {
             ChipletAir::ChunkNodeSponge => ChunkNodeSpongeAir.$method($($arg),*),
-            ChipletAir::BlakeGCompression => BlakeGCompressionAir.$method($($arg),*),
+            ChipletAir::EidosCompression => EidosCompressionAir.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
             ChipletAir::BytePairAnd8 => BytePairAnd8Air.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
@@ -97,7 +97,7 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::ChunkNodeSponge,
-            ChipletAir::BlakeGCompression,
+            ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
             ChipletAir::BytePairAnd8,
             ChipletAir::TranscriptEval,
@@ -162,7 +162,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
-            ChipletAir::BlakeGCompression => eval_lifted(&BlakeGCompressionAir, builder),
+            ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
             ChipletAir::BytePairAnd8 => eval_lifted(&BytePairAnd8Air, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
@@ -245,13 +245,13 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
         log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
         // Precompile-native AIRs commit their unnormalized LogUp residue `sigma`. The intrinsic
-        // BlakeG byte-lookup component and the And8 component retain Miden VM's centered convention
-        // and commit `sigma_prime = sigma / n`, so lift those component residues by their trace
-        // heights before closing the shared relation.
+        // Eidos compression byte-lookup component and the And8 component retain Miden VM's centered
+        // convention and commit `sigma_prime = sigma / n`, so lift those component residues
+        // by their trace heights before closing the shared relation.
         let mut sigma = QuadFelt::ZERO;
         for (idx, values) in aux_values.iter().enumerate() {
             match self.airs[idx] {
-                ChipletAir::BlakeGCompression => {
+                ChipletAir::EidosCompression => {
                     let n = Felt::new_unchecked(1u64 << log_trace_heights[idx]);
                     sigma += values[0] + values[1] * n;
                 },
@@ -277,8 +277,8 @@ impl SessionTraces {
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
-    /// `check_constraints` under the legacy fast test config — a cheap constraint sanity pass
-    /// covering each AIR and the cross-chiplet assertion returned by `eval_external`.
+    /// `check_constraints` under the lightweight test configuration — a cheap constraint sanity
+    /// pass covering each AIR and the cross-chiplet assertion returned by `eval_external`.
     pub fn check(&self) {
         check_constraints(&self.prover_statement(), test_challenger());
     }
@@ -508,7 +508,7 @@ mod tests {
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
             ChipletAir::ChunkNodeSponge,
-            ChipletAir::BlakeGCompression,
+            ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
             ChipletAir::BytePairAnd8,
             ChipletAir::TranscriptEval,

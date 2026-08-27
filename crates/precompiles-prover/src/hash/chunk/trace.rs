@@ -30,7 +30,7 @@ use crate::{
     hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
     logup::build_logup_aux_trace,
     transcript::eidos::{
-        digest::{EidosCap, EidosDigest},
+        digest::{EidosChainContext, EidosDigest},
         trace::{AbsorptionSpan, EidosRequires},
     },
 };
@@ -49,7 +49,7 @@ pub struct Invocation {
 /// What a `ChunkRequires::require` call returns: the content digest
 /// and the `(chunk_seq_id, absorption_id)` ranges the invocation
 /// occupies. The chunk range is what the downstream hasher uses as
-/// its chunk-chain head; the perm span holds the Eidos cycles the chunk
+/// its chunk-chain head; the compression span holds the Eidos cycles the chunk
 /// chiplet stamps into `COL_ABSORPTION_ID`.
 #[derive(Debug, Clone)]
 pub struct ChunkOutput {
@@ -128,15 +128,16 @@ impl ChunkRequires {
             .expect("chunks_from_bytes creates data payload")
             .to_vec();
         debug_assert!(!f_per_chunk.is_empty(), "chunks_from_bytes guarantees ≥1 chunk",);
-        let rate_pairs: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
+        let block_words: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
             .iter()
             .map(|f| {
-                let rate0: [Felt; 4] = f[0..4].try_into().expect("rate0 slice");
-                let rate1: [Felt; 4] = f[4..8].try_into().expect("rate1 slice");
-                (rate0, rate1)
+                let block_lo: [Felt; 4] = f[0..4].try_into().expect("block-low slice");
+                let block_hi: [Felt; 4] = f[4..8].try_into().expect("block-high slice");
+                (block_lo, block_hi)
             })
             .collect();
-        let p2_out = eidos.require_absorption(EidosCap::chunk(), rate_pairs.iter().copied());
+        let eidos_out =
+            eidos.require_absorption(EidosChainContext::chunk(), block_words.iter().copied());
         let n = f_per_chunk.len() as u32;
         let chunk_head = ChunkSeqId(self.next_chunk_seq);
         let chunk_seq_id_range = self.next_chunk_seq..self.next_chunk_seq + n;
@@ -144,12 +145,12 @@ impl ChunkRequires {
         self.records.push(ChunkRecord {
             f_per_chunk,
             chunk_seq_id_range,
-            absorption_span: p2_out.span,
+            absorption_span: eidos_out.span,
         });
         ChunkOutput {
-            digest: p2_out.digest,
+            digest: eidos_out.digest,
             chunk_head,
-            absorption_span: p2_out.span,
+            absorption_span: eidos_out.span,
         }
     }
 

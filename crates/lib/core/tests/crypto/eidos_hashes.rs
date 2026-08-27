@@ -11,7 +11,7 @@ fn raw_absorb_double_words(values: &[u64]) -> Vec<u64> {
 
     for chunk in values.chunks_exact(8) {
         last_block = core::array::from_fn(|i| Felt::new_unchecked(chunk[i]));
-        cv = Eidos::compress_block(cv, last_block);
+        cv = Eidos::compress(cv, last_block);
     }
 
     last_block
@@ -74,7 +74,7 @@ fn test_hash_empty() {
         push.1000
         push.8 exec.eidos::init_chaining_word
         padw padw
-        mem_stream bcompress
+        mem_stream compress
 
         # drop everything except the hash
         exec.eidos::digest movup.4 drop
@@ -150,7 +150,7 @@ fn test_single_iteration() {
         push.1000
         push.8 exec.eidos::init_chaining_word
         padw padw
-        mem_stream bcompress
+        mem_stream compress
 
         # drop everything except the hash
         exec.eidos::digest movup.4 drop
@@ -308,8 +308,8 @@ fn test_absorb_double_words_from_memory() {
     // push.0.0.0.1 stores [1, 0, 0, 0], push.0.0.1.0 stores [0, 1, 0, 0]
     #[rustfmt::skip]
     let mut even_hash = raw_absorb_double_words(&[
-        1, 0, 0, 0, // first word of the rate
-        0, 1, 0, 0, // second word of the rate
+        1, 0, 0, 0, // first word of the block
+        0, 1, 0, 0, // second word of the block
     ]);
 
     // start and end addr
@@ -442,13 +442,13 @@ fn test_copy_digest() {
         push.1000      # start address
         padw padw padw # hasher state
         exec.eidos::absorb_double_words_from_memory
-        # => [A, B, C, end_ptr, end_ptr]  (sponge state [R0, R1, CAP] with R0=A on top)
+        # => [A, B, C, end_ptr, end_ptr]  ([BLOCK_LO, BLOCK_HI, CV] with BLOCK_LO=A on top)
 
         # drop the pointers
         movup.12 drop movup.12 drop
         # => [A, B, C]
 
-        # copy the digest/capacity word
+        # copy the chaining-value word
         exec.eidos::copy_digest
         # => [C, A, B, C]
 
@@ -458,8 +458,8 @@ fn test_copy_digest() {
     "#;
 
     let state = raw_absorb_double_words(&[
-        0, 0, 0, 1, // first word of the rate
-        0, 0, 1, 0, // second word of the rate
+        0, 0, 0, 1, // first word of the block
+        0, 0, 1, 0, // second word of the block
     ]);
     let mut resulting_stack = state[8..12].to_vec();
     resulting_stack.extend(state);

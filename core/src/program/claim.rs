@@ -24,7 +24,7 @@
 //!
 //! `CLAIM_HASH = Eidos::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`. The initial
 //! chaining value binds both the registered domain and the exact logical length (`40`), after
-//! which five BlakeG blocks are compressed.
+//! which Eidos processes five compression blocks in sequence.
 
 use super::{
     KernelDescriptor, ProgramInfo, StackInputs, StackOutputs,

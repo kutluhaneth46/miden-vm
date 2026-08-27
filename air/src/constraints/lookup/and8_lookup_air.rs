@@ -90,7 +90,7 @@ where
             "and8_table_rot12",
             "rot12_row",
             multiplicity.into(),
-            || And8Msg::blakeg_rot12(pos, a.clone(), b.clone(), result.clone()),
+            || And8Msg::eidos_compression_rot12(pos, a.clone(), b.clone(), result.clone()),
         );
     }
 
@@ -102,7 +102,7 @@ where
     ];
     for (pos, (result, multiplicity)) in rot7.into_iter().zip(rot7_mults).enumerate() {
         emit_byte_table_column(builder, "and8_table_rot7", "rot7_row", multiplicity.into(), || {
-            And8Msg::blakeg_rot7(pos, a.clone(), b.clone(), result.clone())
+            And8Msg::eidos_compression_rot7(pos, a.clone(), b.clone(), result.clone())
         });
     }
 

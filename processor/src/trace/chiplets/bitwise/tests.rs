@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
-use miden_core::{ONE, chiplets::blakeg, field::PrimeCharacteristicRing};
+use miden_core::{ONE, chiplets::eidos_compression, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, ChipletTraceFragment, Felt};
@@ -94,10 +94,10 @@ fn aead_stream_trace() {
 
     let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
     let plaintext = [
-        blakeg::pack(plaintext_limbs[0], plaintext_limbs[1]),
-        blakeg::pack(plaintext_limbs[2], plaintext_limbs[3]),
-        blakeg::pack(plaintext_limbs[4], plaintext_limbs[5]),
-        blakeg::pack(plaintext_limbs[6], plaintext_limbs[7]),
+        eidos_compression::pack(plaintext_limbs[0], plaintext_limbs[1]),
+        eidos_compression::pack(plaintext_limbs[2], plaintext_limbs[3]),
+        eidos_compression::pack(plaintext_limbs[4], plaintext_limbs[5]),
+        eidos_compression::pack(plaintext_limbs[6], plaintext_limbs[7]),
     ];
     let keystream = core::array::from_fn(|idx| Felt::from_u32(20 + idx as u32));
     let ciphertext = core::array::from_fn(|idx| {
@@ -210,10 +210,10 @@ fn build_trace_with_width_and_counts(
 fn record_test_aead_stream(bitwise: &mut Bitwise) {
     let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
     let plaintext = [
-        blakeg::pack(plaintext_limbs[0], plaintext_limbs[1]),
-        blakeg::pack(plaintext_limbs[2], plaintext_limbs[3]),
-        blakeg::pack(plaintext_limbs[4], plaintext_limbs[5]),
-        blakeg::pack(plaintext_limbs[6], plaintext_limbs[7]),
+        eidos_compression::pack(plaintext_limbs[0], plaintext_limbs[1]),
+        eidos_compression::pack(plaintext_limbs[2], plaintext_limbs[3]),
+        eidos_compression::pack(plaintext_limbs[4], plaintext_limbs[5]),
+        eidos_compression::pack(plaintext_limbs[6], plaintext_limbs[7]),
     ];
     let keystream = core::array::from_fn(|idx| Felt::from_u32(20 + idx as u32));
     let ciphertext = core::array::from_fn(|idx| {

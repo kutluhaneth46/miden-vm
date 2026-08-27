@@ -1,492 +1,108 @@
-//! Eidos hash framing.
+//! Eidos message framing and block scheduling.
 //!
-//! Defines Eidos packing, padding, domain/mode separation, length binding, and
-//! the public hash API. The raw BlakeG compression core remains internal.
+//! Eidos binds the input mode, domain, and exact logical length into the initial chaining value.
+//! The scheduler then compresses full blocks, zero-pads only a final partial block, and represents
+//! an empty input by one all-zero block compression.
 
-use alloc::vec::Vec;
-use core::array;
+use super::{BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, encoding, primitive::IV};
+use crate::Felt;
 
-use p3_symmetric::CryptographicHasher;
-
-use super::primitive::BlakeG;
-#[cfg(test)]
-use super::primitive::IV;
-use crate::{Felt, Word, field::BasedVectorSpace};
-
-/// Number of felts absorbed per felt-mode block.
-pub const RATE: usize = 8;
-
-/// Number of felts in an Eidos digest.
-pub const DIGEST_WIDTH: usize = 4;
-
-/// Number of independent Eidos inputs processed by the selected native packed backend.
-///
-/// The width is selected at compile time from the target features. Callers should always
-/// process tails by repeating a real lane and discarding the duplicate outputs.
-pub const PACKED_LANES: usize = super::primitive::PACKED_LANES;
-
-/// One packed base-field element, with one independent value per native SIMD lane.
-pub type PackedFelt = [Felt; PACKED_LANES];
-
-/// One packed Eidos digest, with one independent digest per native SIMD lane.
-pub type PackedDigest = [PackedFelt; DIGEST_WIDTH];
-
-/// One packed Eidos felt-mode block, with one independent block per native SIMD lane.
-pub type PackedBlock = [PackedFelt; RATE];
-
-/// Mode bit distinguishing byte mode from felt mode in the init CV.
+/// Mode bit distinguishing byte mode from felt mode in the initial CV.
 const MODE_BIT: u32 = 1 << 31;
 
-const FELT_MODE: u32 = 0;
-const BYTE_MODE: u32 = MODE_BIT;
-
 /// Maximum user domain. The top bit is reserved for [`MODE_BIT`].
-const MAX_DOMAIN: u32 = (1 << 31) - 1;
+pub(super) const MAX_DOMAIN: u32 = (1 << 31) - 1;
 
-// Initial CV bases. `BASE2` reserves its low lane for domain + mode; `BASE3`
-// reserves its low lane for input length.
-const BASE0: u64 = 0x3b67_ae85_6a09_e667;
-const BASE1: u64 = 0x254f_f53a_3c6e_f372;
-const BASE2: u64 = 0x1b05_688c_0000_0000;
-const BASE3: u64 = 0x5be0_cd19_0000_0000;
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u32)]
+pub(super) enum InputMode {
+    Felt = 0,
+    Byte = MODE_BIT,
+}
 
-const FELT_RATE_CV: [u32; 8] = init_cv_unchecked(0, FELT_MODE, RATE as u32);
-// Felt-mode initial chaining word, before absorbing the required zero block for empty input.
-pub(super) const FELT_INIT_DIGEST_U64: [u64; DIGEST_WIDTH] = [BASE0, BASE1, BASE2, BASE3];
+impl InputMode {
+    const fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
 
-/// Pack two `u32` lanes into one Goldilocks field element.
+pub(super) const FELT_BLOCK_INIT_CV: [u32; 8] =
+    init_cv_unchecked(0, InputMode::Felt, BLOCK_LEN as u32);
+
+const FELT_INIT_CV: [u32; 8] = init_cv_unchecked(0, InputMode::Felt, 0);
+
+/// Felt-mode initial chaining word before absorbing the required zero block for empty input.
+pub(super) const FELT_INIT_CV_U64: [u64; DIGEST_WIDTH] = [
+    encoding::pack_output_pair_u64(FELT_INIT_CV[0], FELT_INIT_CV[1]),
+    encoding::pack_output_pair_u64(FELT_INIT_CV[2], FELT_INIT_CV[3]),
+    encoding::pack_output_pair_u64(FELT_INIT_CV[4], FELT_INIT_CV[5]),
+    encoding::pack_output_pair_u64(FELT_INIT_CV[6], FELT_INIT_CV[7]),
+];
+
+#[inline]
+pub(super) fn domain_to_u32(domain: Felt) -> u32 {
+    let domain = domain.as_canonical_u64();
+    assert!(domain <= MAX_DOMAIN as u64, "domain must fit in 31 bits");
+    domain as u32
+}
+
+/// Construct an Eidos initial chaining value directly from the BLAKE3 IV layout.
 ///
-/// The high lane is masked before packing:
-/// `pack(lo, hi) = ((hi & 0x7fff_ffff) << 32) | lo`.
+/// Lanes 4 and 6 are reserved for `domain | mode` and input length. Odd lanes are masked so the
+/// initial CV is already in the same 252-bit subspace as every Eidos compression output.
 #[inline]
-pub(super) fn pack_u32_pair(lo: u32, hi: u32) -> Felt {
-    Felt::new_unchecked((((hi & 0x7fff_ffff) as u64) << 32) | lo as u64)
+pub(super) fn init_cv(domain: u32, mode: InputMode, len: u32) -> [u32; 8] {
+    assert!(domain <= MAX_DOMAIN, "domain must fit in 31 bits");
+    init_cv_unchecked(domain, mode, len)
 }
 
-/// Unpack a canonical field element into two `u32` lanes.
-///
-/// This does not check that `f` was produced by [`pack_u32_pair`].
-#[inline]
-pub(super) fn unpack_u32_pair(f: Felt) -> (u32, u32) {
-    let v = f.as_canonical_u64();
-    (v as u32, (v >> 32) as u32)
-}
-
-/// Convert a packed digest word to its eight-lane chaining value.
-#[inline]
-pub(super) fn unpack_to_cv(w: Word) -> [u32; 8] {
-    let (a, b) = unpack_u32_pair(w[0]);
-    let (c, d) = unpack_u32_pair(w[1]);
-    let (e, f) = unpack_u32_pair(w[2]);
-    let (g, h) = unpack_u32_pair(w[3]);
-    [a, b, c, d, e, f, g, h]
-}
-
-/// Convert an eight-lane chaining value to a packed digest word.
-#[inline]
-pub(super) fn pack_to_word(cv: [u32; 8]) -> Word {
-    Word::new([
-        pack_u32_pair(cv[0], cv[1]),
-        pack_u32_pair(cv[2], cv[3]),
-        pack_u32_pair(cv[4], cv[5]),
-        pack_u32_pair(cv[6], cv[7]),
-    ])
-}
-
-#[inline]
-fn pack_cv_to_felts<const LANES: usize>(cv: [[u32; LANES]; 8]) -> [[Felt; LANES]; DIGEST_WIDTH] {
-    array::from_fn(|word| {
-        array::from_fn(|lane| pack_u32_pair(cv[2 * word][lane], cv[2 * word + 1][lane]))
-    })
-}
-
-#[inline]
-fn pack_cv_to_u64s(cv: [u32; 8]) -> [u64; DIGEST_WIDTH] {
-    array::from_fn(|word| pack_u32_pair_u64(cv[2 * word], cv[2 * word + 1]))
-}
-
-#[inline]
-fn pack_cv_to_packed_u64s<const LANES: usize>(
-    cv: [[u32; LANES]; 8],
-) -> [[u64; LANES]; DIGEST_WIDTH] {
-    array::from_fn(|word| {
-        array::from_fn(|lane| pack_u32_pair_u64(cv[2 * word][lane], cv[2 * word + 1][lane]))
-    })
-}
-
-#[inline]
-pub(super) fn pack_u32_pair_u64(lo: u32, hi: u32) -> u64 {
-    (((hi & 0x7fff_ffff) as u64) << 32) | lo as u64
-}
-
-#[inline]
-fn init_packed_digest<const LANES: usize>(
-    domain: u32,
-    mode: u32,
-    n: u32,
-) -> [[Felt; LANES]; DIGEST_WIDTH] {
-    let cv = init_cv(domain, mode, n);
-    pack_cv_to_felts(array::from_fn(|word| [cv[word]; LANES]))
-}
-
-#[inline]
-fn init_packed_u64_digest<const LANES: usize>(
-    domain: u32,
-    mode: u32,
-    n: u32,
-) -> [[u64; LANES]; DIGEST_WIDTH] {
-    let cv = init_cv(domain, mode, n);
-    pack_cv_to_packed_u64s(array::from_fn(|word| [cv[word]; LANES]))
-}
-
-#[inline]
-fn domain_to_u32(domain: Felt) -> u32 {
-    let d = domain.as_canonical_u64();
-    assert!(d <= MAX_DOMAIN as u64, "domain must fit in 31 bits");
-    d as u32
-}
-
-/// Construct the initial chaining value.
-///
-/// `domain`, `mode`, and input length `n` are injected before the first
-/// compression, so the BlakeG primitive itself does not add domain separation.
-fn init_cv(domain: u32, mode: u32, n: u32) -> [u32; 8] {
-    debug_assert!(domain <= MAX_DOMAIN, "domain must fit in 31 bits");
-    debug_assert!(mode == FELT_MODE || mode == BYTE_MODE, "invalid Eidos mode");
-
-    init_cv_unchecked(domain, mode, n)
-}
-
-const fn init_cv_unchecked(domain: u32, mode: u32, n: u32) -> [u32; 8] {
-    let word2 = BASE2 + (domain as u64) + (mode as u64);
-    let word3 = BASE3 + n as u64;
+const fn init_cv_unchecked(domain: u32, mode: InputMode, len: u32) -> [u32; 8] {
     [
-        BASE0 as u32,
-        (BASE0 >> 32) as u32,
-        BASE1 as u32,
-        (BASE1 >> 32) as u32,
-        word2 as u32,
-        (word2 >> 32) as u32,
-        word3 as u32,
-        (word3 >> 32) as u32,
+        IV[0],
+        IV[1] & encoding::ODD_LANE_MASK,
+        IV[2],
+        IV[3] & encoding::ODD_LANE_MASK,
+        domain | mode.as_u32(),
+        IV[5] & encoding::ODD_LANE_MASK,
+        len,
+        IV[7] & encoding::ODD_LANE_MASK,
     ]
 }
 
 #[inline]
-fn encode_byte_block(chunk: &[u8]) -> [u32; 16] {
-    debug_assert!(chunk.len() <= 64);
-
-    let mut block = [0u32; 16];
-    for (i, four) in chunk.chunks(4).enumerate() {
-        let mut buf = [0u8; 4];
-        buf[..four.len()].copy_from_slice(four);
-        block[i] = u32::from_le_bytes(buf);
-    }
-    block
-}
-
-#[inline]
-pub(super) fn encode_felt_block(chunk: &[Felt]) -> [u32; 16] {
-    debug_assert!(chunk.len() <= RATE);
-
-    let mut block = [0u32; 16];
-    for (i, &f) in chunk.iter().enumerate() {
-        let (lo, hi) = unpack_u32_pair(f);
-        block[2 * i] = lo;
-        block[2 * i + 1] = hi;
-    }
-    block
-}
-
-#[inline]
-fn encode_digest_pair(values: &[Word; 2]) -> [u32; 16] {
-    let mut block = [0u32; 16];
-    for (word_idx, word) in values.iter().enumerate() {
-        for (felt_idx, &felt) in word.iter().enumerate() {
-            let (lo, hi) = unpack_u32_pair(felt);
-            let offset = 2 * (word_idx * DIGEST_WIDTH + felt_idx);
-            block[offset] = lo;
-            block[offset + 1] = hi;
-        }
-    }
-    block
-}
-
-#[inline]
-fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
-    pack_to_word(BlakeG::compress(cv, encode_digest_pair(values)))
-}
-
-#[inline]
-fn encode_u64_block(chunk: &[u64]) -> [u32; 16] {
-    debug_assert!(chunk.len() <= RATE);
-
-    let mut block = [0u32; 16];
-    for (i, &value) in chunk.iter().enumerate() {
-        block[2 * i] = value as u32;
-        block[2 * i + 1] = (value >> 32) as u32;
-    }
-    block
-}
-
-#[inline]
-fn unpack_packed_digest<const LANES: usize>(
-    digest: [[Felt; LANES]; DIGEST_WIDTH],
-) -> [[u32; LANES]; 8] {
-    let pairs = digest.map(|word| word.map(unpack_u32_pair));
-    array::from_fn(|word| {
-        array::from_fn(|lane| {
-            let (lo, hi) = pairs[word / 2][lane];
-            if word % 2 == 0 { lo } else { hi }
-        })
-    })
-}
-
-#[inline]
-fn unpack_packed_u64_digest<const LANES: usize>(
-    digest: [[u64; LANES]; DIGEST_WIDTH],
-) -> [[u32; LANES]; 8] {
-    array::from_fn(|word| {
-        array::from_fn(|lane| {
-            let value = digest[word / 2][lane];
-            if word % 2 == 0 {
-                value as u32
-            } else {
-                (value >> 32) as u32
-            }
-        })
-    })
-}
-
-#[inline]
-pub(super) fn encode_packed_felt_block<const LANES: usize>(
-    block: [[Felt; LANES]; RATE],
-) -> [[u32; LANES]; 16] {
-    let pairs = block.map(|values| values.map(unpack_u32_pair));
-    array::from_fn(|word| {
-        array::from_fn(|lane| {
-            let (lo, hi) = pairs[word / 2][lane];
-            if word % 2 == 0 { lo } else { hi }
-        })
-    })
-}
-
-#[inline]
-fn encode_packed_u64_block<const LANES: usize>(block: [[u64; LANES]; RATE]) -> [[u32; LANES]; 16] {
-    array::from_fn(|word| {
-        array::from_fn(|lane| {
-            let value = block[word / 2][lane];
-            if word % 2 == 0 {
-                value as u32
-            } else {
-                (value >> 32) as u32
-            }
-        })
-    })
-}
-
-/// Hash one full felt-mode block of `u64`-encoded field elements under domain 0.
-#[inline]
-pub(super) fn compress_u64_block(block: [u64; RATE]) -> [u64; DIGEST_WIDTH] {
-    pack_cv_to_u64s(BlakeG::compress(FELT_RATE_CV, encode_u64_block(&block)))
-}
-
-/// Hash one full packed felt-mode block of `u64`-encoded field elements under domain 0.
-#[inline]
-pub(super) fn compress_packed_u64_block(
-    block: [[u64; PACKED_LANES]; RATE],
-) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = array::from_fn(|word| [FELT_RATE_CV[word]; PACKED_LANES]);
-
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    let block = avx512_u64_adapter::unpack_block(block);
-
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
-    let block = encode_packed_u64_block(block);
-
-    let output = BlakeG::compress_packed_native(cv, block);
-
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    {
-        avx512_u64_adapter::pack_cv(output)
-    }
-
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
-    {
-        pack_cv_to_packed_u64s(output)
-    }
-}
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-mod avx512_u64_adapter {
-    use core::arch::x86_64::*;
-
-    use super::{DIGEST_WIDTH, PACKED_LANES, RATE};
-
-    const LANES: usize = PACKED_LANES;
-    const HALF_LANES: usize = LANES / 2;
-    const _: () = assert!(LANES == 16, "the AVX-512 adapter requires sixteen packed lanes");
-
-    #[inline]
-    pub(super) fn unpack_block(block: [[u64; LANES]; RATE]) -> [[u32; LANES]; 16] {
-        let mut output = [[0u32; LANES]; 16];
-
-        for (element, values) in block.iter().enumerate() {
-            for half in 0..2 {
-                let lane_offset = half * HALF_LANES;
-                // SAFETY: this module is compiled only with AVX-512F enabled. `lane_offset` is
-                // either 0 or 8, so the unaligned eight-u64 load remains within `values`.
-                let packed = unsafe {
-                    _mm512_loadu_si512(values.as_ptr().add(lane_offset).cast::<__m512i>())
-                };
-                // SAFETY: these AVX-512F operations only transform the loaded register. Signed
-                // narrowing is intentional: both conversions retain the low 32 bits.
-                let (lo, hi) = unsafe {
-                    (
-                        _mm512_cvtepi64_epi32(packed),
-                        _mm512_cvtepi64_epi32(_mm512_srli_epi64::<32>(packed)),
-                    )
-                };
-
-                // SAFETY: `lane_offset` is either 0 or 8, so each unaligned eight-u32 store
-                // remains within its sixteen-element output row.
-                unsafe {
-                    _mm256_storeu_si256(
-                        output[2 * element].as_mut_ptr().add(lane_offset).cast::<__m256i>(),
-                        lo,
-                    );
-                    _mm256_storeu_si256(
-                        output[2 * element + 1].as_mut_ptr().add(lane_offset).cast::<__m256i>(),
-                        hi,
-                    );
-                }
-            }
-        }
-
-        output
-    }
-
-    #[inline]
-    pub(super) fn pack_cv(cv: [[u32; LANES]; 8]) -> [[u64; LANES]; DIGEST_WIDTH] {
-        let mut output = [[0u64; LANES]; DIGEST_WIDTH];
-        // SAFETY: this module is compiled only with AVX-512F enabled.
-        let high_mask = unsafe { _mm512_set1_epi64(0x7fff_ffff) };
-
-        for word in 0..DIGEST_WIDTH {
-            for half in 0..2 {
-                let lane_offset = half * HALF_LANES;
-                // SAFETY: `lane_offset` is either 0 or 8, so both unaligned eight-u32 loads
-                // remain within their sixteen-element CV rows.
-                let lo32 = unsafe {
-                    _mm256_loadu_si256(cv[2 * word].as_ptr().add(lane_offset).cast::<__m256i>())
-                };
-                let hi32 = unsafe {
-                    _mm256_loadu_si256(cv[2 * word + 1].as_ptr().add(lane_offset).cast::<__m256i>())
-                };
-                // SAFETY: these AVX-512F operations only transform registers. The high word is
-                // masked to preserve the canonical 63-bit field-element encoding.
-                let packed = unsafe {
-                    let lo64 = _mm512_cvtepu32_epi64(lo32);
-                    let hi64 = _mm512_and_si512(_mm512_cvtepu32_epi64(hi32), high_mask);
-                    _mm512_or_si512(lo64, _mm512_slli_epi64::<32>(hi64))
-                };
-
-                // SAFETY: `lane_offset` is either 0 or 8, so the unaligned eight-u64 store
-                // remains within its sixteen-element output row.
-                unsafe {
-                    _mm512_storeu_si512(
-                        output[word].as_mut_ptr().add(lane_offset).cast::<__m512i>(),
-                        packed,
-                    );
-                }
-            }
-        }
-
-        output
-    }
-}
-
-/// Compress one full felt-mode block under a packed Eidos chaining word.
-#[inline]
-pub(super) fn compress_felt_block(cv: Word, block: [Felt; RATE]) -> Word {
-    let cv = unpack_to_cv(cv);
-    let block = encode_felt_block(&block);
-    pack_to_word(BlakeG::compress(cv, block))
-}
-
-#[cfg(test)]
-#[inline]
-pub(super) fn compress_felt_digest_block(
-    cv: [Felt; DIGEST_WIDTH],
-    block: [Felt; RATE],
-) -> [Felt; DIGEST_WIDTH] {
-    compress_felt_block(Word::new(cv), block).into()
-}
-
-#[inline]
-pub(super) fn compress_packed_felt_digest_block(
-    cv: [[Felt; PACKED_LANES]; DIGEST_WIDTH],
-    block: [[Felt; PACKED_LANES]; RATE],
+pub(super) fn init_packed_cv(
+    domain: u32,
+    mode: InputMode,
+    len: u32,
 ) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = unpack_packed_digest(cv);
-    let block = encode_packed_felt_block(block);
-    pack_cv_to_felts(BlakeG::compress_packed_native(cv, block))
+    let cv = init_cv(domain, mode, len);
+    encoding::pack_cv_to_felts(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
 }
 
 #[inline]
-fn exact_size_hint<I: Iterator>(iter: &I) -> Option<usize> {
-    let (lower, upper) = iter.size_hint();
-    upper.filter(|&upper| upper == lower)
+pub(super) fn init_packed_u64_cv(domain: u32, len: u32) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
+    let cv = init_cv(domain, InputMode::Felt, len);
+    encoding::pack_cv_to_packed_u64s(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
 }
 
+/// Fold an exact logical input into fixed-size, zero-padded physical blocks.
+///
+/// Empty inputs emit exactly one all-zero block. A non-empty exact multiple emits no extra block.
+/// The item count is checked against `expected_len`, preserving the `CryptographicHasher`
+/// contract for iterators with dishonest exact size hints.
 #[inline]
-fn assert_yielded_len(actual: usize, expected: usize) {
-    assert_eq!(actual, expected, "iterator yielded a different length than its size_hint");
-}
-
-fn hash_felt_iter_with_len<I>(iter: I, len: usize) -> [Felt; DIGEST_WIDTH]
+pub(super) fn fold_blocks<const BLOCK_LEN: usize, I, State>(
+    iter: I,
+    expected_len: usize,
+    mut state: State,
+    zero: I::Item,
+    mut compress: impl FnMut(State, [I::Item; BLOCK_LEN]) -> State,
+) -> State
 where
-    I: Iterator<Item = Felt>,
+    I: Iterator,
+    I::Item: Copy,
 {
-    let n = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    let mut cv = init_cv(0, FELT_MODE, n);
-    let mut block = [0u32; 16];
-    let mut pos = 0usize;
-    let mut count = 0usize;
-
-    for f in iter {
-        let (lo, hi) = unpack_u32_pair(f);
-        block[2 * pos] = lo;
-        block[2 * pos + 1] = hi;
-        pos += 1;
-        count += 1;
-
-        if pos == RATE {
-            cv = BlakeG::compress(cv, block);
-            pos = 0;
-        }
-    }
-
-    assert_yielded_len(count, len);
-
-    if pos != 0 {
-        block[2 * pos..].fill(0);
-    }
-
-    if count == 0 || pos != 0 {
-        cv = BlakeG::compress(cv, block);
-    }
-
-    pack_to_word(cv).into()
-}
-
-fn hash_u64_iter_with_len<I>(iter: I, len: usize) -> [u64; DIGEST_WIDTH]
-where
-    I: Iterator<Item = u64>,
-{
-    let n = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    let mut cv = init_cv(0, FELT_MODE, n);
-    let mut block = [0u64; RATE];
+    let mut block = [zero; BLOCK_LEN];
     let mut pos = 0usize;
     let mut count = 0usize;
 
@@ -495,629 +111,86 @@ where
         pos += 1;
         count += 1;
 
-        if pos == RATE {
-            cv = BlakeG::compress(cv, encode_u64_block(&block));
+        if pos == BLOCK_LEN {
+            state = compress(state, block);
             pos = 0;
         }
     }
 
-    assert_yielded_len(count, len);
+    assert_eq!(count, expected_len, "iterator yielded a different length than its size_hint");
 
     if pos != 0 {
-        block[pos..].fill(0);
+        block[pos..].fill(zero);
     }
 
     if count == 0 || pos != 0 {
-        cv = BlakeG::compress(cv, encode_u64_block(&block));
+        state = compress(state, block);
     }
 
-    pack_cv_to_u64s(cv)
-}
-
-fn hash_packed_felt_iter_with_len<I>(iter: I, len: usize) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH]
-where
-    I: Iterator<Item = [Felt; PACKED_LANES]>,
-{
-    let n = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    let mut cv = init_packed_digest(0, FELT_MODE, n);
-    let mut block = [[Felt::ZERO; PACKED_LANES]; RATE];
-    let mut pos = 0usize;
-    let mut count = 0usize;
-
-    for values in iter {
-        block[pos] = values;
-        pos += 1;
-        count += 1;
-
-        if pos == RATE {
-            cv = compress_packed_felt_digest_block(cv, block);
-            pos = 0;
-        }
-    }
-
-    assert_yielded_len(count, len);
-
-    if pos != 0 {
-        block[pos..].fill([Felt::ZERO; PACKED_LANES]);
-    }
-
-    if count == 0 || pos != 0 {
-        cv = compress_packed_felt_digest_block(cv, block);
-    }
-
-    cv
-}
-
-fn hash_packed_u64_iter_with_len<I>(iter: I, len: usize) -> [[u64; PACKED_LANES]; DIGEST_WIDTH]
-where
-    I: Iterator<Item = [u64; PACKED_LANES]>,
-{
-    let n = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    let mut cv = init_packed_u64_digest(0, FELT_MODE, n);
-    let mut block = [[0; PACKED_LANES]; RATE];
-    let mut pos = 0usize;
-    let mut count = 0usize;
-
-    for values in iter {
-        block[pos] = values;
-        pos += 1;
-        count += 1;
-
-        if pos == RATE {
-            cv = pack_cv_to_packed_u64s(BlakeG::compress_packed_native(
-                unpack_packed_u64_digest(cv),
-                encode_packed_u64_block(block),
-            ));
-            pos = 0;
-        }
-    }
-
-    assert_yielded_len(count, len);
-
-    if pos != 0 {
-        block[pos..].fill([0; PACKED_LANES]);
-    }
-
-    if count == 0 || pos != 0 {
-        cv = pack_cv_to_packed_u64s(BlakeG::compress_packed_native(
-            unpack_packed_u64_digest(cv),
-            encode_packed_u64_block(block),
-        ));
-    }
-
-    cv
-}
-
-/// Eidos hash construction.
-///
-/// Byte strings and field-element strings use distinct modes. Field hashing additionally accepts
-/// a 31-bit domain, and both modes bind the exact input length into the initial chaining value.
-/// The `CryptographicHasher<u64, _>` implementation hashes exact 64-bit words; it does not reduce
-/// them modulo the Goldilocks field order.
-///
-/// Digests occupy a 252-bit packed subspace and therefore provide at most 126 bits of generic
-/// collision resistance.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Eidos;
-
-impl Eidos {
-    /// Compress one full felt-mode block under a packed Eidos chaining word.
-    ///
-    /// This resumable primitive does not add framing or padding. Callers are responsible for
-    /// selecting an initial chaining word with [`Self::init_chaining_word`] and for supplying
-    /// exactly the blocks implied by the bound total length.
-    #[inline]
-    pub fn compress_block(cv: Word, block: [Felt; RATE]) -> Word {
-        compress_felt_block(cv, block)
-    }
-
-    /// Compress one full felt-mode block in each native packed lane.
-    ///
-    /// This is the packed equivalent of [`Self::compress_block`]. Each lane is an
-    /// independent Eidos chaining word and block; no data crosses between lanes.
-    #[inline]
-    pub fn compress_packed_block(cv: PackedDigest, block: PackedBlock) -> PackedDigest {
-        compress_packed_felt_digest_block(cv, block)
-    }
-
-    /// Return BlakeG XOF output for one full felt-mode block.
-    ///
-    /// Each output element is one canonical `u32` lane embedded in the field.
-    /// This is XOF material for callers that already selected the input CV; it
-    /// is not an Eidos digest.
-    #[inline]
-    pub fn compress_xof_block(cv: Word, block: [Felt; RATE]) -> [Felt; 16] {
-        let cv = unpack_to_cv(cv);
-        let block = encode_felt_block(&block);
-        BlakeG::compress_raw_xof(cv, block).map(Felt::from_u32)
-    }
-
-    /// Construct the transcript init CV used by the Fiat-Shamir challenger.
-    #[inline]
-    pub fn transcript_init_cv(selector: u32) -> Word {
-        assert!(selector <= MAX_DOMAIN, "selector must fit in 31 bits");
-
-        let mut block = [0u32; 16];
-        block[0] = selector;
-        pack_to_word(BlakeG::compress([0u32; 8], block))
-    }
-
-    /// Construct the felt-mode initial chaining value as a packed digest word.
-    ///
-    /// `n` is the total number of felts in the complete message, not the size of the next block.
-    #[inline]
-    pub fn init_chaining_word(domain: u32, n: u32) -> Word {
-        assert!(domain <= MAX_DOMAIN, "domain must fit in 31 bits");
-        pack_to_word(init_cv(domain, FELT_MODE, n))
-    }
-
-    /// Construct the same felt-mode initial chaining word in every native packed lane.
-    ///
-    /// `n` is the total number of felts in each complete message, not the size of the next block.
-    #[inline]
-    pub fn init_packed_chaining_word(domain: u32, n: u32) -> PackedDigest {
-        assert!(domain <= MAX_DOMAIN, "domain must fit in 31 bits");
-        init_packed_digest(domain, FELT_MODE, n)
-    }
-
-    /// Hash a byte string in byte mode.
-    pub fn hash(bytes: &[u8]) -> Word {
-        let n = u32::try_from(bytes.len()).expect("input too long: byte count must fit in u32");
-        let mut cv = init_cv(0, BYTE_MODE, n);
-
-        if bytes.is_empty() {
-            return pack_to_word(BlakeG::compress(cv, [0u32; 16]));
-        }
-
-        for chunk in bytes.chunks(64) {
-            cv = BlakeG::compress(cv, encode_byte_block(chunk));
-        }
-
-        pack_to_word(cv)
-    }
-
-    /// Hash field elements in felt mode under domain 0.
-    #[inline]
-    pub fn hash_elements<E: BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
-        Self::hash_elements_in_domain(elements, Felt::ZERO)
-    }
-
-    /// Hash field elements in felt mode under a user domain.
-    pub fn hash_elements_in_domain<E: BasedVectorSpace<Felt>>(
-        elements: &[E],
-        domain: Felt,
-    ) -> Word {
-        let domain_u32 = domain_to_u32(domain);
-        let n_total = elements
-            .len()
-            .checked_mul(E::DIMENSION)
-            .expect("input too long: felt count overflowed usize");
-        let n = u32::try_from(n_total).expect("input too long: felt count must fit in u32");
-        let mut cv = init_cv(domain_u32, FELT_MODE, n);
-
-        if n == 0 {
-            return pack_to_word(BlakeG::compress(cv, [0u32; 16]));
-        }
-
-        let mut block = [0u32; 16];
-        let mut pos = 0usize;
-
-        for elem in elements {
-            for &f in E::as_basis_coefficients_slice(elem) {
-                let (lo, hi) = unpack_u32_pair(f);
-                block[2 * pos] = lo;
-                block[2 * pos + 1] = hi;
-                pos += 1;
-
-                if pos == RATE {
-                    cv = BlakeG::compress(cv, block);
-                    pos = 0;
-                }
-            }
-        }
-
-        if pos != 0 {
-            block[2 * pos..].fill(0);
-            cv = BlakeG::compress(cv, block);
-        }
-
-        pack_to_word(cv)
-    }
-
-    /// Hash two digest words under domain 0.
-    #[inline]
-    pub fn merge(values: &[Word; 2]) -> Word {
-        compress_digest_pair(values, FELT_RATE_CV)
-    }
-
-    /// Hash two packed digest words under domain 0 in every native packed lane.
-    ///
-    /// This is the packed equivalent of [`Self::merge`].
-    #[inline]
-    pub fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
-        let block = array::from_fn(|i| {
-            if i < DIGEST_WIDTH {
-                values[0][i]
-            } else {
-                values[1][i - DIGEST_WIDTH]
-            }
-        });
-        compress_packed_felt_digest_block(init_packed_digest(0, FELT_MODE, RATE as u32), block)
-    }
-
-    /// Hash two digest words under a user domain.
-    #[inline]
-    pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
-        let domain_u32 = domain_to_u32(domain);
-        let cv = if domain_u32 == 0 {
-            FELT_RATE_CV
-        } else {
-            init_cv(domain_u32, FELT_MODE, RATE as u32)
-        };
-        compress_digest_pair(values, cv)
-    }
-
-    /// Hash a sequence of digest words under domain 0.
-    #[inline]
-    pub fn merge_many(values: &[Word]) -> Word {
-        Self::hash_elements(Word::words_as_elements(values))
-    }
-}
-
-impl CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]> for Eidos {
-    fn hash_iter<I>(&self, input: I) -> [Felt; DIGEST_WIDTH]
-    where
-        I: IntoIterator<Item = Felt>,
-    {
-        let iter = input.into_iter();
-        if let Some(len) = exact_size_hint(&iter) {
-            hash_felt_iter_with_len(iter, len)
-        } else {
-            let elements: Vec<Felt> = iter.collect();
-            Self::hash_elements(&elements).into()
-        }
-    }
-}
-
-impl CryptographicHasher<u64, [u64; DIGEST_WIDTH]> for Eidos {
-    fn hash_iter<I>(&self, input: I) -> [u64; DIGEST_WIDTH]
-    where
-        I: IntoIterator<Item = u64>,
-    {
-        let iter = input.into_iter();
-        if let Some(len) = exact_size_hint(&iter) {
-            hash_u64_iter_with_len(iter, len)
-        } else {
-            let elements: Vec<u64> = iter.collect();
-            let len = elements.len();
-            hash_u64_iter_with_len(elements.into_iter(), len)
-        }
-    }
-}
-
-impl CryptographicHasher<[Felt; PACKED_LANES], [[Felt; PACKED_LANES]; DIGEST_WIDTH]> for Eidos {
-    fn hash_iter<I>(&self, input: I) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH]
-    where
-        I: IntoIterator<Item = [Felt; PACKED_LANES]>,
-    {
-        let iter = input.into_iter();
-        if let Some(len) = exact_size_hint(&iter) {
-            hash_packed_felt_iter_with_len(iter, len)
-        } else {
-            let elements: Vec<[Felt; PACKED_LANES]> = iter.collect();
-            let len = elements.len();
-            hash_packed_felt_iter_with_len(elements.into_iter(), len)
-        }
-    }
-}
-
-impl CryptographicHasher<[u64; PACKED_LANES], [[u64; PACKED_LANES]; DIGEST_WIDTH]> for Eidos {
-    fn hash_iter<I>(&self, input: I) -> [[u64; PACKED_LANES]; DIGEST_WIDTH]
-    where
-        I: IntoIterator<Item = [u64; PACKED_LANES]>,
-    {
-        let iter = input.into_iter();
-        if let Some(len) = exact_size_hint(&iter) {
-            hash_packed_u64_iter_with_len(iter, len)
-        } else {
-            let elements: Vec<[u64; PACKED_LANES]> = iter.collect();
-            let len = elements.len();
-            hash_packed_u64_iter_with_len(elements.into_iter(), len)
-        }
-    }
+    state
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
-
-    use p3_symmetric::CryptographicHasher;
+    use alloc::vec::Vec;
 
     use super::*;
 
-    struct LooseSizeHint<I>(I);
-
-    impl<I: Iterator> Iterator for LooseSizeHint<I> {
-        type Item = I::Item;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next()
-        }
-
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            (0, None)
-        }
-    }
-
     #[test]
-    fn base_constants_match_iv() {
-        assert_eq!(BASE0, pack_u32_pair(IV[0], IV[1]).as_canonical_u64());
-        assert_eq!(BASE1, pack_u32_pair(IV[2], IV[3]).as_canonical_u64());
-        assert_eq!(BASE2, pack_u32_pair(0, IV[5]).as_canonical_u64());
-        assert_eq!(BASE3, pack_u32_pair(0, IV[7]).as_canonical_u64());
-    }
-
-    #[test]
-    fn pack_unpack_roundtrip_in_subspace() {
-        let lo = 0x1234_5678u32;
-        let hi = 0x4abc_def0u32;
-        let f = pack_u32_pair(lo, hi);
-
-        assert_eq!(unpack_u32_pair(f), (lo, hi));
-    }
-
-    #[test]
-    fn pack_masks_top_bit_of_high_lane() {
-        let (_, hi) = unpack_u32_pair(pack_u32_pair(0, 0xffff_ffff));
-        assert_eq!(hi, 0x7fff_ffff);
-    }
-
-    #[test]
-    fn init_cv_layout_for_felt_mode() {
-        let cv = init_cv(7, FELT_MODE, 42);
-        let expected = Word::new([
-            Felt::new_unchecked(BASE0),
-            Felt::new_unchecked(BASE1),
-            Felt::new_unchecked(BASE2 + 7),
-            Felt::new_unchecked(BASE3 + 42),
-        ]);
-
-        assert_eq!(cv, unpack_to_cv(expected));
-    }
-
-    #[test]
-    fn init_cv_layout_for_byte_mode() {
-        let cv = init_cv(7, BYTE_MODE, 42);
-        let expected = Word::new([
-            Felt::new_unchecked(BASE0),
-            Felt::new_unchecked(BASE1),
-            Felt::new_unchecked(BASE2 + 7 + MODE_BIT as u64),
-            Felt::new_unchecked(BASE3 + 42),
-        ]);
-
-        assert_eq!(cv, unpack_to_cv(expected));
-    }
-
-    #[test]
-    fn init_cv_lives_in_252_bit_subspace() {
-        let cv = init_cv(0, FELT_MODE, 0);
-
-        assert_eq!(cv[1] & !0x7fff_ffff, 0);
-        assert_eq!(cv[3] & !0x7fff_ffff, 0);
-        assert_eq!(cv[5] & !0x7fff_ffff, 0);
-        assert_eq!(cv[7] & !0x7fff_ffff, 0);
-    }
-
-    #[test]
-    fn empty_inputs_use_one_zero_block() {
-        assert_ne!(Eidos::hash(&[]), Eidos::hash_elements::<Felt>(&[]));
-    }
-
-    #[test]
-    fn transcript_init_cv_matches_one_blakeg_compression() {
-        let selector = 0x0201u32;
-        let mut block = [0u32; 16];
-        block[0] = selector;
-
-        assert_eq!(
-            Eidos::transcript_init_cv(selector),
-            pack_to_word(BlakeG::compress([0; 8], block))
-        );
-    }
-
-    #[test]
-    fn compress_xof_block_returns_raw_u32_lanes_as_felts() {
-        let cv = Eidos::init_chaining_word(7, RATE as u32);
-        let block: [Felt; RATE] = array::from_fn(|idx| Felt::new_unchecked((idx as u64 + 1) * 17));
-
-        let expected = BlakeG::compress_raw_xof(unpack_to_cv(cv), encode_felt_block(&block))
-            .map(Felt::from_u32);
-
-        assert_eq!(Eidos::compress_xof_block(cv, block), expected);
-    }
-
-    #[test]
-    fn packed_felt_hasher_matches_scalar_lanes() {
-        let inputs: Vec<[Felt; PACKED_LANES]> = (0..19)
-            .map(|i| array::from_fn(|lane| Felt::new_unchecked((i * 17 + lane * 3 + 1) as u64)))
-            .collect();
-        let packed = <Eidos as CryptographicHasher<
-            [Felt; PACKED_LANES],
-            [[Felt; PACKED_LANES]; DIGEST_WIDTH],
-        >>::hash_iter(&Eidos, inputs.iter().copied());
-
-        for lane in 0..PACKED_LANES {
-            let scalar_input: Vec<_> = inputs.iter().map(|value| value[lane]).collect();
-            let scalar = <Eidos as CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]>>::hash_iter(
-                &Eidos,
-                scalar_input,
-            );
-            let packed_lane: [Felt; DIGEST_WIDTH] = array::from_fn(|word| packed[word][lane]);
-            assert_eq!(packed_lane, scalar);
+    fn initial_cv_is_derived_from_blake3_iv() {
+        for (domain, len, mode) in [
+            (0, 0, InputMode::Felt),
+            (MAX_DOMAIN, u32::MAX, InputMode::Felt),
+            (7, 42, InputMode::Byte),
+        ] {
+            let cv = init_cv(domain, mode, len);
+            assert_eq!(cv[0], IV[0]);
+            assert_eq!(cv[1], IV[1] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[2], IV[2]);
+            assert_eq!(cv[3], IV[3] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[4], domain | mode.as_u32());
+            assert_eq!(cv[5], IV[5] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[6], len);
+            assert_eq!(cv[7], IV[7] & encoding::ODD_LANE_MASK);
         }
     }
 
     #[test]
-    fn packed_resumable_api_matches_scalar_lanes() {
-        let domain = 17;
-        let input_len = (2 * RATE) as u32;
-        let mut packed_cv = Eidos::init_packed_chaining_word(domain, input_len);
-        let packed_block: PackedBlock = array::from_fn(|element| {
-            array::from_fn(|lane| Felt::new_unchecked((element * 101 + lane * 17 + 3) as u64))
-        });
-        packed_cv = Eidos::compress_packed_block(packed_cv, packed_block);
-
-        let packed_other: PackedDigest = array::from_fn(|element| {
-            array::from_fn(|lane| {
-                Eidos::hash_elements(&[
-                    Felt::new_unchecked((lane * 29 + 5) as u64),
-                    Felt::new_unchecked((element * 31 + 7) as u64),
-                ])[element]
-            })
-        });
-        let packed_merged = Eidos::merge_packed(&[packed_cv, packed_other]);
-
-        for lane in 0..PACKED_LANES {
-            let scalar_block = array::from_fn(|element| packed_block[element][lane]);
-            let scalar_cv =
-                Eidos::compress_block(Eidos::init_chaining_word(domain, input_len), scalar_block);
-            let scalar_other = Word::new(array::from_fn(|element| packed_other[element][lane]));
-            let scalar_merged = Eidos::merge(&[scalar_cv, scalar_other]);
-            let packed_lane = Word::new(array::from_fn(|element| packed_merged[element][lane]));
-
-            assert_eq!(packed_lane, scalar_merged, "packed lane {lane} diverged");
-        }
+    fn felt_init_cv_u64_matches_initial_cv() {
+        assert_eq!(FELT_INIT_CV_U64, encoding::pack_cv_to_u64s(FELT_INIT_CV));
     }
 
     #[test]
-    fn u64_hasher_matches_felt_hasher() {
-        let inputs: Vec<Felt> =
-            (0..19).map(|idx| Felt::new_unchecked((idx * 17 + 1) as u64)).collect();
-        let input_words = inputs.iter().map(Felt::as_canonical_u64);
-
-        let packed = <Eidos as CryptographicHasher<u64, [u64; DIGEST_WIDTH]>>::hash_iter(
-            &Eidos,
-            input_words,
-        );
-        let scalar =
-            <Eidos as CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]>>::hash_iter(&Eidos, inputs);
-
-        assert_eq!(packed.map(Felt::new_unchecked), scalar);
-    }
-
-    #[test]
-    fn packed_u64_hasher_matches_scalar_lanes() {
-        let inputs: Vec<[u64; PACKED_LANES]> = (0..19)
-            .map(|i| {
-                array::from_fn(|lane| {
-                    Felt::new_unchecked((i * 17 + lane * 3 + 1) as u64).as_canonical_u64()
-                })
-            })
-            .collect();
-        let packed = <Eidos as CryptographicHasher<
-            [u64; PACKED_LANES],
-            [[u64; PACKED_LANES]; DIGEST_WIDTH],
-        >>::hash_iter(&Eidos, inputs.iter().copied());
-
-        for lane in 0..PACKED_LANES {
-            let scalar_input: Vec<_> = inputs.iter().map(|value| value[lane]).collect();
-            let scalar = <Eidos as CryptographicHasher<u64, [u64; DIGEST_WIDTH]>>::hash_iter(
-                &Eidos,
-                scalar_input,
-            );
-            let packed_lane: [u64; DIGEST_WIDTH] = array::from_fn(|word| packed[word][lane]);
-            assert_eq!(packed_lane, scalar);
-        }
-    }
-
-    #[test]
-    fn packed_u64_block_compression_matches_scalar_lanes_for_mixed_bits() {
-        for batch in 0..32 {
-            let block = mixed_packed_u64_block(batch);
-            let packed = compress_packed_u64_block(block);
-
-            for lane in 0..PACKED_LANES {
-                let scalar_block = array::from_fn(|element| block[element][lane]);
-                let scalar = compress_u64_block(scalar_block);
-                let packed_lane = array::from_fn(|word| packed[word][lane]);
-                assert_eq!(packed_lane, scalar, "packed lane {lane} diverged in batch {batch}");
-            }
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    #[test]
-    fn avx512_u64_adapter_matches_generic_layout() {
-        for batch in 0..32 {
-            let block = mixed_packed_u64_block(batch);
-            assert_eq!(
-                avx512_u64_adapter::unpack_block(block),
-                encode_packed_u64_block(block),
-                "AVX-512 input adapter diverged in batch {batch}",
+    fn block_schedule_handles_boundaries_canonically() {
+        for len in [0, 1, 7, 8, 9, 15, 16, 17] {
+            let input: Vec<u32> = (1..=len as u32).collect();
+            let blocks = fold_blocks::<8, _, _>(
+                input.iter().copied(),
+                len,
+                Vec::new(),
+                0,
+                |mut blocks, block| {
+                    blocks.push(block);
+                    blocks
+                },
             );
 
-            let cv =
-                array::from_fn(|word| array::from_fn(|lane| mixed_u64(batch, word, lane) as u32));
-            assert_eq!(
-                avx512_u64_adapter::pack_cv(cv),
-                pack_cv_to_packed_u64s(cv),
-                "AVX-512 output adapter diverged in batch {batch}",
-            );
+            let expected_blocks = if len == 0 { 1 } else { len.div_ceil(8) };
+            assert_eq!(blocks.len(), expected_blocks);
+            assert_eq!(blocks.concat()[..len], input);
+            assert!(blocks.concat()[len..].iter().all(|value| *value == 0));
         }
     }
 
-    fn mixed_packed_u64_block(batch: usize) -> [[u64; PACKED_LANES]; RATE] {
-        const BOUNDARIES: [u64; 8] = [
-            0,
-            1,
-            u32::MAX as u64,
-            1u64 << 32,
-            0x7fff_ffff_ffff_ffff,
-            0x8000_0000_0000_0000,
-            0xffff_ffff_0000_0001,
-            u64::MAX,
-        ];
-
-        array::from_fn(|element| {
-            array::from_fn(|lane| {
-                if batch == 0 {
-                    BOUNDARIES[(element * PACKED_LANES + lane) % BOUNDARIES.len()]
-                } else {
-                    mixed_u64(batch, element, lane)
-                }
-            })
-        })
-    }
-
-    fn mixed_u64(batch: usize, element: usize, lane: usize) -> u64 {
-        let mut value = (batch as u64)
-            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
-            .wrapping_add((element as u64) << 32)
-            .wrapping_add(lane as u64);
-        value ^= value >> 30;
-        value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        value ^= value >> 27;
-        value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
-        value ^ (value >> 31)
+    #[test]
+    #[should_panic(expected = "iterator yielded a different length than its size_hint")]
+    fn block_schedule_rejects_too_few_items() {
+        fold_blocks::<8, _, _>([1, 2].into_iter(), 3, (), 0, |(), _| ());
     }
 
     #[test]
-    fn hash_iter_supports_non_exact_iterators() {
-        let felts: Vec<Felt> =
-            (0..19).map(|idx| Felt::new_unchecked((idx * 17 + 1) as u64)).collect();
-        let exact =
-            <Eidos as CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]>>::hash_iter(&Eidos, felts);
-
-        let loose = LooseSizeHint((0..19).map(|idx| Felt::new_unchecked((idx * 17 + 1) as u64)));
-        let actual =
-            <Eidos as CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]>>::hash_iter(&Eidos, loose);
-
-        assert_eq!(actual, exact);
-    }
-
-    #[test]
-    fn hash_elements_is_deterministic() {
-        let xs = vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        assert_eq!(Eidos::hash_elements(&xs), Eidos::hash_elements(&xs));
+    #[should_panic(expected = "iterator yielded a different length than its size_hint")]
+    fn block_schedule_rejects_too_many_items() {
+        fold_blocks::<8, _, _>([1, 2, 3].into_iter(), 2, (), 0, |(), _| ());
     }
 }

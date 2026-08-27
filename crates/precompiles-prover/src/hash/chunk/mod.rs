@@ -8,7 +8,7 @@
 //!
 //! See the design notes for
 //! the design. The chiplet does not read the Eidos digest —
-//! `OutRate0` is the downstream digest consumer's to consume.
+//! the terminal chaining value on `EidosOut` is consumed downstream.
 
 pub mod message;
 pub mod trace;
@@ -61,11 +61,11 @@ pub const COL_ABSORPTION_ID: usize = 1;
 /// trace-tail rows contribute nothing.
 pub const COL_ACT: usize = 2;
 /// 1 on the chain-head row of each invocation (its first chunk). Gates
-/// the `InCap` consume and determines the Eidos chain structure
-/// (`is_absorb = 1 − is_head`, tied by the `InCap` bus balance).
+/// the `ChunkChain` relation and relaxes Eidos-cycle continuity at the start of a new chain.
 pub const COL_IS_HEAD: usize = 3;
 /// First of the 8 chunk-content felts. `lane_j = (f[2j], f[2j+1])` on
-/// Memory64; `rate0 = f[0..4]`, `rate1 = f[4..8]` on Eidos. Every
+/// Memory64; the Eidos message block is `block_lo = f[0..4]`,
+/// `block_hi = f[4..8]`. Every
 /// chunk emits all four lanes; per-hasher block-fit (leftover-lane
 /// handling, padding) lives downstream, not here.
 pub const COL_F_BEGIN: usize = 4;

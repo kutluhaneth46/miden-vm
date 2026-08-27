@@ -263,7 +263,7 @@ pub enum Instruction {
     // ----- cryptographic operations ------------------------------------------------------------
     Hash,
     HMerge,
-    BCompress,
+    Compress,
     MTreeGet,
     MTreeSet,
     MTreeMerge,

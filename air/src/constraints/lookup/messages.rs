@@ -13,20 +13,20 @@
 
 use miden_core::{
     WORD_SIZE,
-    chiplets::blakeg,
+    chiplets::eidos_compression,
     field::{Algebra, PrimeCharacteristicRing},
 };
 
 use crate::{
     lookup::{Challenges, message::LookupMessage},
-    trace::chiplets::hasher::{RATE_LEN, STATE_WIDTH},
+    trace::chiplets::hasher::{BLOCK_LEN, STATE_WIDTH},
 };
 
 // MESSAGE PAYLOAD ALIASES
 // ================================================================================================
 
-type SpongeState<E> = [E; STATE_WIDTH];
-type Rate<E> = [E; RATE_LEN];
+type CompressionState<E> = [E; STATE_WIDTH];
+type Block<E> = [E; BLOCK_LEN];
 type WordFields<E> = [E; WORD_SIZE];
 
 // BUS IDENTIFIERS
@@ -94,37 +94,37 @@ pub enum BusId {
     AceWiring = 22,
     /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
     HasherCompressionLink = 23,
-    /// BlakeG internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
-    BlakeGInputCv = 24,
+    /// Eidos compression internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
+    EidosCompressionInputCv = 24,
     /// Byte-pair lookup table: ordinary `[a, b, a & b]` for byte-sized operands.
     And8Lookup = 25,
-    /// BlakeG rot12 contribution for byte position 0: `[a, b, contribution]`.
-    BlakeGRot12Pos0 = 26,
-    /// BlakeG rot12 contribution for byte position 1: `[a, b, contribution]`.
-    BlakeGRot12Pos1 = 27,
-    /// BlakeG rot12 contribution for byte position 2: `[a, b, contribution]`.
-    BlakeGRot12Pos2 = 28,
-    /// BlakeG rot12 contribution for byte position 3: `[a, b, contribution]`.
-    BlakeGRot12Pos3 = 29,
-    /// BlakeG rot7 contribution for byte position 0: `[a, b, contribution]`.
-    BlakeGRot7Pos0 = 30,
-    /// BlakeG rot7 contribution for byte position 1: `[a, b, contribution]`.
-    BlakeGRot7Pos1 = 31,
-    /// BlakeG rot7 contribution for byte position 2: `[a, b, contribution]`.
-    BlakeGRot7Pos2 = 32,
-    /// BlakeG rot7 contribution for byte position 3: `[a, b, contribution]`.
-    BlakeGRot7Pos3 = 33,
-    /// BlakeG internal chaining-value pair bus:
+    /// Eidos compression rot12 contribution for byte position 0: `[a, b, contribution]`.
+    EidosCompressionRot12Pos0 = 26,
+    /// Eidos compression rot12 contribution for byte position 1: `[a, b, contribution]`.
+    EidosCompressionRot12Pos1 = 27,
+    /// Eidos compression rot12 contribution for byte position 2: `[a, b, contribution]`.
+    EidosCompressionRot12Pos2 = 28,
+    /// Eidos compression rot12 contribution for byte position 3: `[a, b, contribution]`.
+    EidosCompressionRot12Pos3 = 29,
+    /// Eidos compression rot7 contribution for byte position 0: `[a, b, contribution]`.
+    EidosCompressionRot7Pos0 = 30,
+    /// Eidos compression rot7 contribution for byte position 1: `[a, b, contribution]`.
+    EidosCompressionRot7Pos1 = 31,
+    /// Eidos compression rot7 contribution for byte position 2: `[a, b, contribution]`.
+    EidosCompressionRot7Pos2 = 32,
+    /// Eidos compression rot7 contribution for byte position 3: `[a, b, contribution]`.
+    EidosCompressionRot7Pos3 = 33,
+    /// Eidos compression internal chaining-value pair bus:
     /// `[4 * compression_cycle_id + pair_index, word_even, word_odd]`.
-    BlakeGInputWord = 34,
-    /// BlakeG internal message-word bus: `[word_index, word, compression_cycle_id]`.
-    BlakeGMessageWord = 35,
+    EidosCompressionInputWord = 34,
+    /// Eidos compression internal message-word bus: `[word_index, word, compression_cycle_id]`.
+    EidosCompressionMessageWord = 35,
     /// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
     AeadStreamRequest = 36,
-    /// AEAD-XOF BlakeG input request: `[state[0..12], clk, 0, 0, 0]`.
-    AeadBlakeGInput = 37,
-    /// AEAD-XOF BlakeG output pair: `[clk, first_lane_idx, value0, value1]`.
-    AeadBlakeGOutputPair = 38,
+    /// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
+    AeadEidosCompressionInput = 37,
+    /// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
+    AeadEidosCompressionOutputPair = 38,
 }
 
 impl BusId {
@@ -132,7 +132,7 @@ impl BusId {
     /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
     /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
     /// discriminant isn't contiguous).
-    pub const COUNT: usize = Self::AeadBlakeGOutputPair as usize + 1;
+    pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
 }
 
 // Per-variant discriminant locks. `BusId::COUNT` only catches gaps. A *reorder* that
@@ -166,21 +166,21 @@ const _: () = assert!(BusId::SiblingTable as usize == 20);
 const _: () = assert!(BusId::RangeCheck as usize == 21);
 const _: () = assert!(BusId::AceWiring as usize == 22);
 const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
-const _: () = assert!(BusId::BlakeGInputCv as usize == 24);
+const _: () = assert!(BusId::EidosCompressionInputCv as usize == 24);
 const _: () = assert!(BusId::And8Lookup as usize == 25);
-const _: () = assert!(BusId::BlakeGRot12Pos0 as usize == 26);
-const _: () = assert!(BusId::BlakeGRot12Pos1 as usize == 27);
-const _: () = assert!(BusId::BlakeGRot12Pos2 as usize == 28);
-const _: () = assert!(BusId::BlakeGRot12Pos3 as usize == 29);
-const _: () = assert!(BusId::BlakeGRot7Pos0 as usize == 30);
-const _: () = assert!(BusId::BlakeGRot7Pos1 as usize == 31);
-const _: () = assert!(BusId::BlakeGRot7Pos2 as usize == 32);
-const _: () = assert!(BusId::BlakeGRot7Pos3 as usize == 33);
-const _: () = assert!(BusId::BlakeGInputWord as usize == 34);
-const _: () = assert!(BusId::BlakeGMessageWord as usize == 35);
+const _: () = assert!(BusId::EidosCompressionRot12Pos0 as usize == 26);
+const _: () = assert!(BusId::EidosCompressionRot12Pos1 as usize == 27);
+const _: () = assert!(BusId::EidosCompressionRot12Pos2 as usize == 28);
+const _: () = assert!(BusId::EidosCompressionRot12Pos3 as usize == 29);
+const _: () = assert!(BusId::EidosCompressionRot7Pos0 as usize == 30);
+const _: () = assert!(BusId::EidosCompressionRot7Pos1 as usize == 31);
+const _: () = assert!(BusId::EidosCompressionRot7Pos2 as usize == 32);
+const _: () = assert!(BusId::EidosCompressionRot7Pos3 as usize == 33);
+const _: () = assert!(BusId::EidosCompressionInputWord as usize == 34);
+const _: () = assert!(BusId::EidosCompressionMessageWord as usize == 35);
 const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
-const _: () = assert!(BusId::AeadBlakeGInput as usize == 37);
-const _: () = assert!(BusId::AeadBlakeGOutputPair as usize == 38);
+const _: () = assert!(BusId::AeadEidosCompressionInput as usize == 37);
+const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -200,10 +200,10 @@ pub struct HasherMsg<E> {
 /// Payload for a [`HasherMsg`]; width varies per interaction kind.
 #[derive(Clone, Debug)]
 pub enum HasherPayload<E> {
-    /// 12-lane BlakeG state.
-    State(SpongeState<E>),
-    /// 8-lane rate.
-    Rate(Rate<E>),
+    /// 12-lane Eidos compression state.
+    State(CompressionState<E>),
+    /// 8-Felt compression block.
+    Block(Block<E>),
     /// 4-element word/digest.
     Word(WordFields<E>),
     /// Merkle direction bit followed by a 4-element leaf word.
@@ -213,10 +213,10 @@ pub enum HasherPayload<E> {
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     // --- State messages (14 payload elements: [addr, node_index, state[12]]) ---
 
-    /// Linear hash / control block init: full 12-lane BlakeG state.
+    /// Linear hash / control block init: full 12-lane Eidos compression state.
     ///
-    /// Used by: BCOMPRESS input, LOGDEFERRED input.
-    pub fn linear_hash_init(addr: E, state: SpongeState<E>) -> Self {
+    /// Used by: COMPRESS input, LOGDEFERRED input.
+    pub fn linear_hash_init(addr: E, state: CompressionState<E>) -> Self {
         Self {
             kind: BusId::HasherLinearHashInit,
             addr,
@@ -225,21 +225,21 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    /// Control block init: 8 rate lanes + BlakeG chaining word initialized from `opcode`.
+    /// Control block init: one 8-Felt block + Eidos chaining word initialized from `opcode`.
     ///
     /// Used by: JOIN, SPLIT, LOOP, CALL, SYSCALL, DYN, DYNCALL.
-    pub fn control_block(addr: E, rate: &[E; 8], opcode: u8) -> Self {
-        let cv = blakeg::two_to_one_chaining_word(opcode as u32);
+    pub fn control_block(addr: E, block: &[E; 8], opcode: u8) -> Self {
+        let cv = eidos_compression::two_to_one_chaining_word(opcode as u32);
         let cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
         let state = [
-            rate[0].clone(),
-            rate[1].clone(),
-            rate[2].clone(),
-            rate[3].clone(),
-            rate[4].clone(),
-            rate[5].clone(),
-            rate[6].clone(),
-            rate[7].clone(),
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
             cv[0].clone(),
             cv[1].clone(),
             cv[2].clone(),
@@ -253,21 +253,21 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    /// Basic-block hash init: 8 rate lanes + BlakeG chaining word initialized from the
+    /// Basic-block hash init: one 8-Felt block + Eidos chaining word initialized from the
     /// logical number of operation groups in the block.
-    pub fn basic_block_init(addr: E, rate: &[E; 8], num_groups: E) -> Self {
-        let cv = blakeg::init_chaining_word(0, 0);
+    pub fn basic_block_init(addr: E, block: &[E; 8], num_groups: E) -> Self {
+        let cv = eidos_compression::init_chaining_word(0, 0);
         let mut cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
         cv[3] = cv[3].clone() + num_groups;
         let state = [
-            rate[0].clone(),
-            rate[1].clone(),
-            rate[2].clone(),
-            rate[3].clone(),
-            rate[4].clone(),
-            rate[5].clone(),
-            rate[6].clone(),
-            rate[7].clone(),
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
             cv[0].clone(),
             cv[1].clone(),
             cv[2].clone(),
@@ -281,25 +281,26 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    // --- Rate messages (10 payload elements: [addr, node_index, rate[8]]) ---
+    // --- Block messages (10 payload elements: [addr, node_index, block[8]]) ---
 
-    /// Absorb new rate into running hash.
+    /// Absorb the next block into a running hash.
     ///
     /// Used by: RESPAN.
-    pub fn absorption(addr: E, rate: Rate<E>) -> Self {
+    pub fn absorption(addr: E, block: Block<E>) -> Self {
         Self {
             kind: BusId::HasherAbsorption,
             addr,
             node_index: E::ZERO,
-            payload: HasherPayload::Rate(rate),
+            payload: HasherPayload::Block(block),
         }
     }
 
     // --- Word messages (6 payload elements: [addr, node_index, word[4]]) ---
 
-    /// Return digest only (node_index = 0).
+    /// Return one four-Felt hash result or updated chaining value (`node_index = 0`).
     ///
-    /// Used by: BCOMPRESS output, LOGDEFERRED output, END, MPVERIFY output, MRUPDATE output.
+    /// `COMPRESS` returns an updated CV; the framed hash operations return completed digests.
+    /// Used by: COMPRESS output, LOGDEFERRED output, END, MPVERIFY output, MRUPDATE output.
     pub fn return_hash(addr: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherReturnHash,
@@ -571,7 +572,7 @@ pub struct StackOverflowMsg<E> {
 
 /// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
 ///
-/// Binds one hasher controller row to one BlakeG compression block.
+/// Binds one hasher controller row to one Eidos compression block.
 #[derive(Clone, Debug)]
 pub struct HasherCompressionLinkMsg<E> {
     pub block: [E; 8],
@@ -584,7 +585,7 @@ pub struct HasherCompressionLinkMsg<E> {
 
 /// Byte-pair lookup message (3 elements): `[a, b, result]`.
 ///
-/// Ordinary AND uses `result = a & b`. BlakeG B/D rotation buses use
+/// Ordinary AND uses `result = a & b`. Eidos compression B/D rotation buses use
 /// `result` as the 32-bit contribution of this byte pair to the rotated word.
 #[derive(Clone, Debug)]
 pub struct And8Msg<E> {
@@ -600,34 +601,44 @@ impl<E: PrimeCharacteristicRing> And8Msg<E> {
         Self { bus: BusId::And8Lookup, a, b, result }
     }
 
-    /// BlakeG rot12 contribution at byte position `pos`.
-    pub fn blakeg_rot12(pos: usize, a: E, b: E, result: E) -> Self {
-        Self { bus: blakeg_rot12_bus(pos), a, b, result }
+    /// Eidos compression rot12 contribution at byte position `pos`.
+    pub fn eidos_compression_rot12(pos: usize, a: E, b: E, result: E) -> Self {
+        Self {
+            bus: eidos_compression_rot12_bus(pos),
+            a,
+            b,
+            result,
+        }
     }
 
-    /// BlakeG rot7 contribution at byte position `pos`.
-    pub fn blakeg_rot7(pos: usize, a: E, b: E, result: E) -> Self {
-        Self { bus: blakeg_rot7_bus(pos), a, b, result }
+    /// Eidos compression rot7 contribution at byte position `pos`.
+    pub fn eidos_compression_rot7(pos: usize, a: E, b: E, result: E) -> Self {
+        Self {
+            bus: eidos_compression_rot7_bus(pos),
+            a,
+            b,
+            result,
+        }
     }
 }
 
-pub const fn blakeg_rot12_bus(pos: usize) -> BusId {
+pub const fn eidos_compression_rot12_bus(pos: usize) -> BusId {
     match pos {
-        0 => BusId::BlakeGRot12Pos0,
-        1 => BusId::BlakeGRot12Pos1,
-        2 => BusId::BlakeGRot12Pos2,
-        3 => BusId::BlakeGRot12Pos3,
-        _ => panic!("BlakeG rot12 byte position must be in 0..4"),
+        0 => BusId::EidosCompressionRot12Pos0,
+        1 => BusId::EidosCompressionRot12Pos1,
+        2 => BusId::EidosCompressionRot12Pos2,
+        3 => BusId::EidosCompressionRot12Pos3,
+        _ => panic!("EidosCompression rot12 byte position must be in 0..4"),
     }
 }
 
-pub const fn blakeg_rot7_bus(pos: usize) -> BusId {
+pub const fn eidos_compression_rot7_bus(pos: usize) -> BusId {
     match pos {
-        0 => BusId::BlakeGRot7Pos0,
-        1 => BusId::BlakeGRot7Pos1,
-        2 => BusId::BlakeGRot7Pos2,
-        3 => BusId::BlakeGRot7Pos3,
-        _ => panic!("BlakeG rot7 byte position must be in 0..4"),
+        0 => BusId::EidosCompressionRot7Pos0,
+        1 => BusId::EidosCompressionRot7Pos1,
+        2 => BusId::EidosCompressionRot7Pos2,
+        3 => BusId::EidosCompressionRot7Pos3,
+        _ => panic!("EidosCompression rot7 byte position must be in 0..4"),
     }
 }
 
@@ -644,16 +655,16 @@ pub struct AeadStreamRequestMsg<E> {
     pub lane_base: E,
 }
 
-/// AEAD-XOF BlakeG input request: `[state[0..12], clk, 0, 0, 0]`.
+/// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
 #[derive(Clone, Debug)]
-pub struct AeadBlakeGInputMsg<E> {
+pub struct AeadEidosCompressionInputMsg<E> {
     pub clk: E,
-    pub state: SpongeState<E>,
+    pub state: CompressionState<E>,
 }
 
-/// AEAD-XOF BlakeG output pair: `[clk, first_lane_idx, value0, value1]`.
+/// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
 #[derive(Clone, Debug)]
-pub struct AeadBlakeGOutputPairMsg<E> {
+pub struct AeadEidosCompressionOutputPairMsg<E> {
     pub clk: E,
     pub first_lane_idx: E,
     pub value0: E,
@@ -775,8 +786,8 @@ where
             HasherPayload::State(state) => {
                 acc += challenges.inner_product_at(2, state.as_slice());
             },
-            HasherPayload::Rate(rate) => {
-                acc += challenges.inner_product_at(2, rate.as_slice());
+            HasherPayload::Block(block) => {
+                acc += challenges.inner_product_at(2, block.as_slice());
             },
             HasherPayload::Word(word) => {
                 acc += challenges.inner_product_at(2, word.as_slice());
@@ -854,7 +865,7 @@ where
     }
 }
 
-impl<E, EF> LookupMessage<E, EF> for AeadBlakeGInputMsg<E>
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionInputMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
@@ -869,18 +880,18 @@ where
                 E::ZERO
             }
         });
-        challenges.encode(BusId::AeadBlakeGInput as usize, fields)
+        challenges.encode(BusId::AeadEidosCompressionInput as usize, fields)
     }
 }
 
-impl<E, EF> LookupMessage<E, EF> for AeadBlakeGOutputPairMsg<E>
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionOutputPairMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
-            BusId::AeadBlakeGOutputPair as usize,
+            BusId::AeadEidosCompressionOutputPair as usize,
             [
                 self.clk.clone(),
                 self.first_lane_idx.clone(),
@@ -1155,16 +1166,16 @@ where
 // SIBLING MESSAGES
 // ================================================================================================
 //
-// [`SiblingMsg<E>`] carries an already selected rate half and a [`SiblingBit`] tag. It uses the
+// [`SiblingMsg<E>`] carries an already selected block half and a [`SiblingBit`] tag. It uses the
 // sparse beta layout expected by the hasher chiplet. Lookup-message encoders may touch sparse beta
 // positions; contiguity is a convention, not a requirement.
 
 /// Sibling-table message for the Merkle sibling bus.
 ///
-/// The Merkle direction bit picks which half of the hasher rate block holds the sibling:
+/// The Merkle direction bit picks which half of the Eidos block holds the sibling:
 /// `bit = 0` puts the sibling at `h[4..8]`, with payload in beta positions
 /// `[1, 2, 7, 8, 9, 10]` (mrupdate_id at beta^1, node_index at beta^2,
-/// rate1 at beta^7..beta^10). `bit = 1` puts the sibling at `h[0..4]`,
+/// high block word at beta^7..beta^10). `bit = 1` puts the sibling at `h[0..4]`,
 /// with payload in beta positions `[1, 2, 3, 4, 5, 6]`.
 #[derive(Clone, Debug)]
 pub struct SiblingMsg<E> {
@@ -1174,12 +1185,12 @@ pub struct SiblingMsg<E> {
     pub h: WordFields<E>,
 }
 
-/// Which half of the hasher rate block holds the sibling word for this row.
+/// Which half of the Eidos block holds the sibling word for this row.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SiblingBit {
-    /// `bit = 0`: sibling lives in the high rate half (`h[4..8]`).
+    /// `bit = 0`: sibling lives in the high block word (`h[4..8]`).
     Zero,
-    /// `bit = 1`: sibling lives in the low rate half (`h[0..4]`).
+    /// `bit = 1`: sibling lives in the low block word (`h[0..4]`).
     One,
 }
 
@@ -1208,7 +1219,7 @@ mod tests {
     use crate::lookup::{Challenges, message::LookupMessage};
 
     #[test]
-    fn blakeg_rotation_positions_are_domain_separated() {
+    fn eidos_compression_rotation_positions_are_domain_separated() {
         let challenges = Challenges::<QuadFelt>::new(
             QuadFelt::new([Felt::new_unchecked(3), Felt::new_unchecked(5)]),
             QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
@@ -1220,11 +1231,11 @@ mod tests {
         let b = Felt::new_unchecked(23);
         let result = Felt::new_unchecked(29);
 
-        let rot12_pos0 = And8Msg::blakeg_rot12(0, a, b, result).encode(&challenges);
-        let rot12_pos1 = And8Msg::blakeg_rot12(1, a, b, result).encode(&challenges);
+        let rot12_pos0 = And8Msg::eidos_compression_rot12(0, a, b, result).encode(&challenges);
+        let rot12_pos1 = And8Msg::eidos_compression_rot12(1, a, b, result).encode(&challenges);
         assert_ne!(rot12_pos0, rot12_pos1);
 
-        let rot7_pos0 = And8Msg::blakeg_rot7(0, a, b, result).encode(&challenges);
+        let rot7_pos0 = And8Msg::eidos_compression_rot7(0, a, b, result).encode(&challenges);
         assert_ne!(rot12_pos0, rot7_pos0);
     }
 }

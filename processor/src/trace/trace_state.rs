@@ -1024,7 +1024,7 @@ impl BlockAddressReplay {
 /// trace generation.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher operations from BCompress requests.
+    /// Recorded hasher operations from Compress requests.
     ///
     /// Each entry contains (address, output_state)
     compression_operations: VecDeque<(Felt, [Felt; 12])>,
@@ -1044,7 +1044,7 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records a `Hasher::bcompress` operation with its address and compressed state.
+    /// Records a `Hasher::compress` operation with its address and compressed state.
     pub fn record_compression(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
         self.compression_operations.push_back((addr, hashed_state));
     }
@@ -1062,7 +1062,7 @@ impl HasherResponseReplay {
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
 
-    /// Replays a `Hasher::bcompress` operation, returning its address and compressed state.
+    /// Replays a `Hasher::compress` operation, returning its address and compressed state.
     pub fn replay_compression(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
         self.compression_operations
             .pop_front()
@@ -1085,7 +1085,7 @@ impl HasherResponseReplay {
 }
 
 impl HasherInterface for HasherResponseReplay {
-    fn bcompress(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
+    fn compress(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
         self.replay_compression()
     }
 
@@ -1095,7 +1095,8 @@ impl HasherInterface for HasherResponseReplay {
         _clk: RowIndex,
         state: HasherState,
     ) -> Result<[Felt; 16], OperationError> {
-        Ok(miden_core::chiplets::blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32))
+        Ok(miden_core::chiplets::eidos_compression::compress_raw_xof_lanes(&state)
+            .map(Felt::from_u32))
     }
 
     fn verify_merkle_root(
@@ -1139,7 +1140,7 @@ impl HasherInterface for HasherResponseReplay {
 /// operands.
 #[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
-    BCompress([Felt; STATE_WIDTH]),
+    Compress([Felt; STATE_WIDTH]),
     AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
@@ -1154,7 +1155,7 @@ impl HasherOp {
     /// needs forest access.
     fn resolve_forest_free<'a>(self) -> Option<ResolvedHasherOp<'a>> {
         match self {
-            HasherOp::BCompress(s) => Some(ResolvedHasherOp::BCompress(s)),
+            HasherOp::Compress(s) => Some(ResolvedHasherOp::Compress(s)),
             HasherOp::AeadXof(ctx, clk, s) => Some(ResolvedHasherOp::AeadXof(ctx, clk, s)),
             HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
             HasherOp::HashBasicBlock(_) => None,
@@ -1181,7 +1182,7 @@ pub enum ResolvedBasicBlockGroups<'a> {
 /// streaming path resolves at record time and forwards owned data to the concurrent builder.
 #[derive(Debug)]
 pub enum ResolvedHasherOp<'a> {
-    BCompress([Felt; STATE_WIDTH]),
+    Compress([Felt; STATE_WIDTH]),
     AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     HashBasicBlock((ResolvedBasicBlockGroups<'a>, Word)),
@@ -1283,9 +1284,9 @@ impl HasherRequestReplay {
         }
     }
 
-    /// Records a `Hasher::bcompress()` request.
-    pub fn record_bcompress_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.record(HasherOp::BCompress(state));
+    /// Records a `Hasher::compress()` request.
+    pub fn record_compress_input(&mut self, state: [Felt; STATE_WIDTH]) {
+        self.record(HasherOp::Compress(state));
     }
 
     /// Records an AEAD-XOF compression request.

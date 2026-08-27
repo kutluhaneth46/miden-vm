@@ -1,7 +1,7 @@
 //! Byte-pair lookup table AIR.
 //!
 //! The fixed preprocessed trace enumerates one row per byte pair. The row serves
-//! ten lookup domains: ordinary `(a, b, a & b)`, one BlakeG rotation-contribution
+//! ten lookup domains: ordinary `(a, b, a & b)`, one Eidos compression rotation-contribution
 //! domain for each `(rotation, byte-position)` pair, and `RangeCheck` for the
 //! 16-bit value `256 * a + b`. The dynamic main trace carries one multiplicity
 //! column per domain.

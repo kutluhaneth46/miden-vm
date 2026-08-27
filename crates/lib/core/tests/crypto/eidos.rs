@@ -4,7 +4,7 @@ fn digest_extracts_deepest_post_compression_word() {
     use miden::core::crypto::hashes::eidos
 
     begin
-        # Build a post-compression BlakeG state: [CV, ZERO, DIGEST].
+        # Build a three-word state: [BLOCK_LO, BLOCK_HI, CV_CURRENT].
         push.44.43.42.41
         padw
         push.4.3.2.1

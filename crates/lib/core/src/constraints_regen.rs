@@ -478,7 +478,7 @@ pub proc process_row_ood_evaluations
     repeat.{pipe_blocks}
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 "#,

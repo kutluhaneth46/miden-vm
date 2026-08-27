@@ -369,7 +369,7 @@ fn advice_insert_hdword() {
         movup.8 drop
         push.6620516959492505608.1947077364412317705.2688637133034287986.4280581858871862887
         movdnw.2
-        bcompress
+        compress
         dropw dropw
         # => [KEY, ...]
 
@@ -389,6 +389,32 @@ fn advice_insert_hdword() {
 }
 
 #[test]
+fn advice_insert_compress() {
+    let source: &str = "
+    begin
+        # stack: [BLOCK_LO, BLOCK_HI, CV]
+
+        # Store the two block words under the raw compression output CV.
+        adv.insert_compress
+
+        # Recompute that key from the unchanged input state.
+        compress
+        swapw.2
+        # => [CV', BLOCK_HI, BLOCK_LO]
+
+        # Load the inserted block words and remove the compression state.
+        adv.push_mapval
+        dropw dropw dropw
+
+        # Reconstruct [BLOCK_LO, BLOCK_HI] from the advice stack.
+        adv_loadw swapw adv_loadw swapw
+    end";
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    build_test!(source, &stack_inputs).expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+}
+
+#[test]
 fn advice_insert_hqword() {
     let source: &str = "
     begin
@@ -400,10 +426,10 @@ fn advice_insert_hqword() {
         # Hash the four words with Eidos length binding for 16 input felts.
         push.6620516959492505616.1947077364412317696.2688637133034287986.4280581858871862887
         movdnw.2
-        bcompress
+        compress
         dropw dropw
         movdnw.2
-        bcompress
+        compress
         dropw dropw
         # => [KEY]
 

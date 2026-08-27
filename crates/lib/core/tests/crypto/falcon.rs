@@ -390,16 +390,16 @@ fn falcon_hash_to_point_loop_matches_eidos() {
     let nonce_elements = nonce.to_elements();
 
     let mut cv = Eidos::init_chaining_word(FALCON_H2P_DOMAIN, 0);
-    cv = Eidos::compress_block(cv, nonce_elements);
+    cv = Eidos::compress(cv, nonce_elements);
 
     let mut message_block = [ZERO; 8];
     message_block[..Word::NUM_ELEMENTS].copy_from_slice(message.as_slice());
-    cv = Eidos::compress_block(cv, message_block);
+    cv = Eidos::compress(cv, message_block);
 
     let squeeze_block = [ZERO; 8];
     let mut expected = Vec::with_capacity(N);
     for _ in 0..128 {
-        cv = Eidos::compress_block(cv, squeeze_block);
+        cv = Eidos::compress(cv, squeeze_block);
         expected.extend_from_slice(cv.as_slice());
     }
 

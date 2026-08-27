@@ -6,7 +6,7 @@ sidebar_position: 4
 # Performance
 
 The first two benchmark tables below are historical, pre-Eidos measurements retained as a rough
-guide. They have not been rerun against the current four-AIR Eidos/BlakeG VM and must not be cited
+guide. They have not been rerun against the current four-AIR Eidos VM and must not be cited
 as current performance. Fresh measurements will replace them after the matching transaction and
 benchmark producers are ported.
 
@@ -52,9 +52,10 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 ## Recursion-friendly proofs
 
 Proofs in the above benchmarks are generated using BLAKE3. While BLAKE3 is fast on conventional
-processors, it is not efficient to execute inside the VM. The VM's native Eidos transcript and
-BlakeG compression are designed for recursive proof verification. The prover also retains optional
-proof-hash configurations, including Poseidon2, for compatibility and comparative testing.
+processors, it is not efficient to execute inside the VM. The VM-native Eidos construction—its
+framed transcript and underlying compression—is designed for recursive proof verification. The
+prover also retains optional proof-hash configurations, including Poseidon2, for compatibility and
+comparative testing.
 
 The historical comparison below runs the same Blake3 example for 2<sup>20</sup> cycles at a 96-bit
 target security level using the optional Poseidon2 STARK proof-hash configuration instead of

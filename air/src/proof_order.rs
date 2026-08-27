@@ -10,7 +10,7 @@ use crate::MidenAir;
 pub const AIRS: [MidenAir; 4] = [
     MidenAir::Core,
     MidenAir::Chiplets,
-    MidenAir::BlakeGCompression,
+    MidenAir::EidosCompression,
     MidenAir::And8Lookup,
 ];
 
@@ -168,7 +168,7 @@ mod tests {
         const PINNED: [MidenAir; MIDEN_AIR_COUNT] = [
             MidenAir::Core,
             MidenAir::Chiplets,
-            MidenAir::BlakeGCompression,
+            MidenAir::EidosCompression,
             MidenAir::And8Lookup,
         ];
         assert_eq!(
@@ -224,7 +224,7 @@ mod tests {
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::BlakeGCompression,
+                MidenAir::EidosCompression,
                 MidenAir::And8Lookup,
             ])
         );
@@ -233,7 +233,7 @@ mod tests {
             ProofOrder::from_airs(&[
                 MidenAir::Chiplets,
                 MidenAir::Core,
-                MidenAir::BlakeGCompression,
+                MidenAir::EidosCompression,
                 MidenAir::And8Lookup,
             ])
         );
@@ -242,7 +242,7 @@ mod tests {
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::BlakeGCompression,
+                MidenAir::EidosCompression,
                 MidenAir::And8Lookup,
             ])
         );

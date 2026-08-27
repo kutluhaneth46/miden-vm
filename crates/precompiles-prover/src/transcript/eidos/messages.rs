@@ -1,4 +1,4 @@
-//! LogUp interface messages for the native Eidos/BlakeG compression chiplet.
+//! LogUp interface messages for the native Eidos compression chiplet.
 //!
 //! The input relation carries one complete logical chaining step atomically: its identifier,
 //! domain, eight packed message fields, and four-field chain framing context. Keeping these fields
@@ -23,7 +23,7 @@ pub const EIDOS_DOMAIN_CHUNKS: u8 = 4;
 ///
 /// - `chain_step_id` uniquely identifies the logical message-block step.
 /// - `domain` separates generic-node, AND, and CHUNKS chains.
-/// - `message` is the complete eight-field packed BlakeG message block.
+/// - `message` is the complete eight-field packed Eidos compression message block.
 /// - `chain_context` is the four-field framing value shared by every step in the chain.
 ///
 /// The 14-field payload remains below the PVM relation domain's width of 18.

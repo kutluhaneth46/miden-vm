@@ -100,11 +100,11 @@ mod tests {
     };
 
     use crate::{
-        BlakeGCompressionAir, ChipletsAir, Felt, MidenAir, NUM_BLAKEG_COMPRESSION_COLS,
+        ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
         NUM_PUBLIC_VALUES,
         constraints::{
-            blakeg_compression::lookup::BLAKEG_LOOKUP_COLUMN_SHAPE,
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
+            eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
             lookup::{
                 BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
                 main_air::MAIN_COLUMN_SHAPE,
@@ -199,20 +199,19 @@ mod tests {
     }
 
     #[test]
-    fn blakeg_compression_air_lookup_validates() {
-        let num_periodic = BlakeGCompressionAir.periodic_columns().len();
+    fn eidos_compression_air_lookup_validates() {
+        let num_periodic = EidosCompressionAir.periodic_columns().len();
         let layout = ValidateLayout {
             preprocessed_width: 0,
-            trace_width: NUM_BLAKEG_COMPRESSION_COLS,
+            trace_width: NUM_EIDOS_COMPRESSION_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
-            permutation_width: BLAKEG_LOOKUP_COLUMN_SHAPE.len(),
+            permutation_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::BLAKEG_COMPRESSION, layout).unwrap_or_else(|err| {
-            panic!("BlakeGCompressionAir LookupAir validation failed: {err}")
-        });
+        ValidateLookupAir::validate(&MidenAir::EIDOS_COMPRESSION, layout)
+            .unwrap_or_else(|err| panic!("EidosCompressionAir LookupAir validation failed: {err}"));
     }
 
     #[test]

@@ -241,7 +241,7 @@ fn multi_air_ace_circuit_emits_consistently() {
     };
 
     for order in ProofOrder::variants() {
-        // Check that the ACE encoding is well-formed and rate-aligned.
+        // Check that the ACE encoding is well-formed and block-aligned.
         let circuit = build_multi_air_ace_circuit_for_order(config, &order).expect("ACE circuit");
         let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
         assert!(

@@ -30,7 +30,7 @@ use miden_air::{
 };
 use miden_core::{
     Felt, ONE, ZERO,
-    chiplets::blakeg,
+    chiplets::eidos_compression,
     operations::{Operation, opcodes},
 };
 
@@ -214,7 +214,7 @@ fn aead_stream_emits_memory_requests() {
         Felt::new_unchecked(3),
         Felt::new_unchecked(4),
     ];
-    let keystream = blakeg::compress_raw_xof_lanes(&input_state);
+    let keystream = eidos_compression::compress_raw_xof_lanes(&input_state);
     let ciphertext: [Felt; 16] = keystream.map(Felt::from_u32);
     let zero_word = [ZERO, ZERO, ZERO, ZERO];
     let cipher_words: [[Felt; 4]; 4] =

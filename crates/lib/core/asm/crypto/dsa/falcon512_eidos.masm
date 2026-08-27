@@ -128,7 +128,7 @@ pub proc hash_to_point
     exec.eidos::compress
     # => [MSG, 0, C, c_ptr, ...]
 
-    # Squeeze four coefficients per BlakeG compression.
+    # Squeeze four coefficients per Eidos compression.
     dropw dropw
     padw padw
     # => [0, 0, C, c_ptr, ...]
@@ -263,7 +263,7 @@ pub proc load_h_s2_and_product
     push.FALCON_PRODUCT_DOMAIN
     exec.eidos::merge_in_domain
     padw padw
-    # => [Y, Y, C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
 
     # 5) Load s2 and evaluate at tau_inv
 
@@ -297,14 +297,14 @@ pub proc load_h_s2_and_product
         horner_eval_base
         exec.eidos::compress
     end
-    # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     # 6) Load claimed h * s2 in Z_Q[x]
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.14
     push.0 movdn.14
-    # => [Y, Y, C, ptr, tau_inv_ptr, 0, 0, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, 0, 0, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     repeat.128
         adv_pipe

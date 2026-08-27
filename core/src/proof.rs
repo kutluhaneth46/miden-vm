@@ -412,6 +412,13 @@ mod tests {
         StarkProof::new(bytes.to_vec(), HashFunction::Blake3_256)
     }
 
+    #[test]
+    fn eidos_hash_function_wire_tag_is_pinned() {
+        assert_eq!(HashFunction::Eidos as u8, 0x06);
+        assert_eq!(HashFunction::Eidos.to_bytes(), [0x06]);
+        assert_eq!(HashFunction::read_from_bytes(&[0x06]).unwrap(), HashFunction::Eidos);
+    }
+
     fn root(value: u64) -> DeferredRoot {
         [Felt::new(value).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO].into()
     }

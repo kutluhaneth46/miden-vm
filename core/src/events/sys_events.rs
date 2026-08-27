@@ -279,7 +279,7 @@ pub enum SystemEvent {
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying `bcompress` to all three words.
+    /// under the key `Eidos::compress(C, A || B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, C, ...]
@@ -289,10 +289,9 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed by extracting the digest elements from bcompress([A, B, C]). In
-    /// particular, setting `C = Eidos::init_chaining_word(d, 8)` produces
+    /// In particular, setting `C = Eidos::init_chaining_word(d, 8)` produces
     /// `Eidos::hash_elements_in_domain(A || B, d)`.
-    BCompressToMap,
+    CompressToMap,
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
@@ -503,7 +502,7 @@ impl SystemEvent {
             Self::HdwordToMap,
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
-            Self::BCompressToMap,
+            Self::CompressToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
             Self::DeferredEvaluateTag,
@@ -649,8 +648,11 @@ impl SystemEvent {
             name: "sys::hqword_to_map",
         },
         SystemEventEntry {
+            // This string is part of the event identity and is hashed into compiled programs.
+            // Changing it requires a MAST format transition even though the assembly instruction is
+            // spelled `adv.insert_compress`.
             id: EventId::from_u64(454105713963103935),
-            event: SystemEvent::BCompressToMap,
+            event: SystemEvent::CompressToMap,
             name: "sys::bcompress_to_map",
         },
         SystemEventEntry {
@@ -790,7 +792,7 @@ mod test {
                 | SystemEvent::HdwordToMap
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::BCompressToMap
+                | SystemEvent::CompressToMap
                 | SystemEvent::DeferredRegister
                 | SystemEvent::DeferredEvaluate
                 | SystemEvent::DeferredEvaluateTag
@@ -799,5 +801,12 @@ mod test {
                 | SystemEvent::TraceEvent => {},
             }
         }
+    }
+
+    #[test]
+    fn compress_to_map_preserves_its_wire_identity() {
+        assert_eq!(SystemEvent::CompressToMap as usize, 18);
+        assert_eq!(SystemEvent::CompressToMap.event_id(), EventId::from_u64(454105713963103935));
+        assert_eq!(SystemEvent::CompressToMap.event_name().as_str(), "sys::bcompress_to_map");
     }
 }

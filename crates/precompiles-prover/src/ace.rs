@@ -235,7 +235,7 @@ mod tests {
     fn quotient_chunks_match_the_symbolic_derivation() {
         const EXPECTED: [(&str, u8); NUM_CHIPLETS] = [
             ("ChunkNodeSponge", 2),
-            ("BlakeGCompression", 1),
+            ("EidosCompression", 1),
             ("KeccakRound", 2),
             ("BytePairAnd8", 1),
             ("TranscriptEval", 1),

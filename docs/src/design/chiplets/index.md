@@ -11,7 +11,7 @@ Currently, Miden VM relies on 5 chiplets:
 
 - The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), whose controller records Eidos
   sequential, control-block, Merkle, and deferred-root compressions. The computation is proved by
-  the separate `BlakeGCompressionAir` and `And8LookupAir` instances.
+  the separate `EidosCompressionAir` and `And8LookupAir` instances.
 - The [Bitwise Chiplet](./bitwise.md), used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
 - The [Memory Chiplet](./memory.md), used to support random-access memory in the VM.
 - The [Arithmetic Circuit Evaluation (ACE)](./ace.md), used to ensure that arithmetic circuits evaluate to zero.
@@ -61,8 +61,8 @@ This is true for any transition constraints that are applied at every row and se
 This requires the following adjustments for each chiplet.
 
 **In the hash chiplet:** controller constraints explicitly confine the end of the controller region.
-The controller region is padded to an 8-row boundary before the bitwise region begins. BlakeG
-compression constraints live in `BlakeGCompressionAir`, not in the chiplets trace.
+The controller region is padded to an 8-row boundary before the bitwise region begins. Eidos
+compression constraints live in `EidosCompressionAir`, not in the chiplets trace.
 
 **In the bitwise chiplet:** there is no conflict, and therefore no change, since all constraints are periodic.
 
@@ -88,7 +88,7 @@ The IDs relevant to the stacked chiplets are protocol constants:
 | Kernel ROM call | 3 |
 | Hasher full-state input | 4 |
 | Hasher sequential absorption | 6 |
-| Hasher digest return | 7 |
+| Hasher result/CV return | 7 |
 | Merkle verify input | 8 |
 | Merkle update old/new inputs | 9 / 10 |
 | Memory element read/write | 11 / 12 |

@@ -15,7 +15,7 @@
     "trace": {
       "core_rows": 77683,
       "chiplets_rows": 6537,
-      "blakeg_compression_rows": 120384,
+      "eidos_compression_rows": 120384,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 3762,
@@ -43,7 +43,7 @@
     "trace": {
       "core_rows": 80506,
       "chiplets_rows": 7370,
-      "blakeg_compression_rows": 138240,
+      "eidos_compression_rows": 138240,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 4320,
@@ -68,7 +68,7 @@
     "trace": {
       "core_rows": 76728,
       "chiplets_rows": 6251,
-      "blakeg_compression_rows": 115968,
+      "eidos_compression_rows": 115968,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 3624,
@@ -95,7 +95,7 @@
     "trace": {
       "core_rows": 35617,
       "chiplets_rows": 10388,
-      "blakeg_compression_rows": 141248,
+      "eidos_compression_rows": 141248,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 4414,
@@ -122,7 +122,7 @@
     "trace": {
       "core_rows": 47867,
       "chiplets_rows": 13162,
-      "blakeg_compression_rows": 182464,
+      "eidos_compression_rows": 182464,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 5702,
@@ -149,7 +149,7 @@
     "trace": {
       "core_rows": 163016,
       "chiplets_rows": 42886,
-      "blakeg_compression_rows": 896832,
+      "eidos_compression_rows": 896832,
       "byte_pair_lookup_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 28026,

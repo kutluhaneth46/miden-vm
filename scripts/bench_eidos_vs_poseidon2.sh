@@ -172,9 +172,9 @@ fn main() {
 
     let source = fs::read_to_string(&path).expect("read MASM fixture");
     let (required, forbidden) = if protocol == "eidos" {
-        ("bcompress", "hperm")
+        ("compress", "hperm")
     } else {
-        ("hperm", "bcompress")
+        ("hperm", "compress")
     };
     assert!(source.lines().any(|line| line.trim() == required));
     assert!(!source.lines().any(|line| line.trim() == forbidden));
@@ -301,10 +301,10 @@ for index in "${!FILES[@]}"; do
   source_path="$FIXTURE_ROOT/${FILES[$index]}"
   eidos_path="$EIDOS_FIXTURES/${FILES[$index]}"
   reverse_path="$RUN_DIR/fixtures/reversed.masm"
-  perl -pe 's/\bhperm\b/bcompress/g' "$source_path" > "$eidos_path"
-  perl -pe 's/\bbcompress\b/hperm/g' "$eidos_path" > "$reverse_path"
+  perl -pe 's/\bhperm\b/compress/g' "$source_path" > "$eidos_path"
+  perl -pe 's/\bcompress\b/hperm/g' "$eidos_path" > "$reverse_path"
   cmp -s "$source_path" "$reverse_path" ||
-    die "fixture ${FILES[$index]} changed beyond hperm -> bcompress"
+    die "fixture ${FILES[$index]} changed beyond hperm -> compress"
 done
 rm "$RUN_DIR/fixtures/reversed.masm"
 
@@ -314,11 +314,11 @@ for index in "${!RECURSIVE_FILES[@]}"; do
   eidos_fixture="$EIDOS_FIXTURES/$fixture"
   reverse_fixture="$RUN_DIR/fixtures/reversed-recursive-$auth.masm"
   if [[ ! -f "$eidos_fixture" ]]; then
-    perl -pe 's/\bhperm\b/bcompress/g' "$FIXTURE_ROOT/$fixture" > "$eidos_fixture"
+    perl -pe 's/\bhperm\b/compress/g' "$FIXTURE_ROOT/$fixture" > "$eidos_fixture"
   fi
-  perl -pe 's/\bbcompress\b/hperm/g' "$eidos_fixture" > "$reverse_fixture"
+  perl -pe 's/\bcompress\b/hperm/g' "$eidos_fixture" > "$reverse_fixture"
   cmp -s "$FIXTURE_ROOT/$fixture" "$reverse_fixture" ||
-    die "recursive $auth fixture changed beyond hperm -> bcompress"
+    die "recursive $auth fixture changed beyond hperm -> compress"
   rm "$reverse_fixture"
 done
 
@@ -409,7 +409,11 @@ for index in "${!FILES[@]}"; do
   p2_core="$(extract_row core_trace_len "$p2_log")"
   eidos_core="$(extract_row core_rows "$eidos_log")"
   p2_hash="$(extract_row poseidon2_permutation_trace_len "$p2_log")"
-  eidos_hash="$(extract_row blakeg_compression_rows "$eidos_log")"
+  eidos_hash="$(extract_row eidos_compression_rows "$eidos_log" || true)"
+  if [[ -z "$eidos_hash" ]]; then
+    # Archived trace logs from a pre-rename checkout may use the earlier field spelling.
+    eidos_hash="$(extract_row blakeg_compression_rows "$eidos_log")"
+  fi
   [[ -n "$p2_core" && -n "$eidos_core" && -n "$p2_hash" && -n "$eidos_hash" ]] ||
     die "could not parse trace shape for $label"
   [[ "$p2_core" == "$eidos_core" ]] || die "core rows differ for $label"

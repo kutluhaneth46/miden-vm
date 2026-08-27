@@ -270,7 +270,7 @@ impl PrettyPrint for Instruction {
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),
             Self::HMerge => const_text("hmerge"),
-            Self::BCompress => const_text("bcompress"),
+            Self::Compress => const_text("compress"),
             Self::MTreeGet => const_text("mtree_get"),
             Self::MTreeSet => const_text("mtree_set"),
             Self::MTreeMerge => const_text("mtree_merge"),
@@ -439,6 +439,12 @@ mod tests {
 
         let instruction = format!("{}", Instruction::ExpBitLength(32));
         assert_eq!("exp.u32", instruction);
+
+        assert_eq!(format!("{}", Instruction::Compress), "compress");
+        assert_eq!(
+            format!("{}", Instruction::SysEvent(SystemEventNode::InsertCompress)),
+            "adv.insert_compress"
+        );
 
         let instruction = format!(
             "{}",

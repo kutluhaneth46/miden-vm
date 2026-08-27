@@ -8,7 +8,7 @@ use miden_core::{
 use miden_crypto::stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
 use miden_lifted_air::{BaseAir, LiftedAir};
 
-use super::{BlakeGInterfaceAir, NUM_MAIN_COLS};
+use super::{EidosCompressionInterfaceAir, NUM_MAIN_COLS};
 
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
@@ -24,8 +24,11 @@ struct ConstraintEvalBuilder {
 
 impl ConstraintEvalBuilder {
     fn inactive_row_with_zero_challenges() -> Self {
-        let periodic_values =
-            BlakeGInterfaceAir.periodic_columns().iter().map(|column| column[1]).collect();
+        let periodic_values = EidosCompressionInterfaceAir
+            .periodic_columns()
+            .iter()
+            .map(|column| column[1])
+            .collect();
         let mut aux = vec![QuadFelt::ZERO; 4];
         aux[1] = QuadFelt::ONE;
 
@@ -34,7 +37,7 @@ impl ConstraintEvalBuilder {
             aux: RowMajorMatrix::new(aux, 2),
             randomness: vec![QuadFelt::ZERO; 2],
             permutation_values: vec![QuadFelt::ZERO],
-            public_values: vec![Felt::ZERO; BlakeGInterfaceAir.num_public_values()],
+            public_values: vec![Felt::ZERO; EidosCompressionInterfaceAir.num_public_values()],
             periodic_values,
             base_evaluations: Vec::new(),
             extension_evaluations: Vec::new(),
@@ -124,7 +127,7 @@ impl PermutationAirBuilder for ConstraintEvalBuilder {
 #[test]
 fn aux_column_one_is_pinned_on_inactive_zero_denominator_rows() {
     let mut builder = ConstraintEvalBuilder::inactive_row_with_zero_challenges();
-    BlakeGInterfaceAir.eval(&mut builder);
+    EidosCompressionInterfaceAir.eval(&mut builder);
 
     assert!(builder.base_evaluations.iter().all(|&value| value == Felt::ZERO));
     let nonzero: Vec<_> = builder

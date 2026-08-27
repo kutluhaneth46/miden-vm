@@ -5,8 +5,8 @@
 //! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller rows
 //!    with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
 //!    adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which half
-//!    of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add, two
-//!    remove).
+//!    of `block = [block_lo, block_hi]` holds the sibling, giving four gated interactions (two add,
+//!    two remove).
 //! 2. **ACE memory reads** - on ACE chiplet rows, the block selector distinguishes word reads
 //!    (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are removed from the
 //!    chiplets bus.
@@ -107,10 +107,10 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
 
-    // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)` -
-    // sibling messages only use the rate halves.
-    let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    // The controller state is `[block_lo (4), block_hi (4), cv (4)]`; sibling messages use only
+    // the two block words.
+    let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
+    let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     let mrupdate_id = local.controller_mrupdate_id();
     let node_index = ctrl.merkle_node_index();
 
@@ -162,8 +162,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                 |g| {
                     // --- SIBLING TABLE ---
                     // MV adds (old path), MU removes (new path); each splits on the Merkle
-                    // direction bit into a BitZero (sibling at rate_1) and BitOne (sibling
-                    // at rate_0) branch. Four mutually exclusive interactions total.
+                    // direction bit into a BitZero (sibling in the high block word) and BitOne
+                    // (sibling in the low block word) branch. Four mutually exclusive
+                    // interactions total.
                     for (op_name, is_add, f_all, bit_tag, bit_gate) in [
                         (
                             "sibling_mv_b0",
@@ -181,8 +182,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let mrupdate_id: LB::Expr = mrupdate_id.into();
                             let node_index: LB::Expr = node_index.into();
                             let h = match bit_tag {
-                                SiblingBit::Zero => array::from_fn(|i| rate_1[i].into()),
-                                SiblingBit::One => array::from_fn(|i| rate_0[i].into()),
+                                SiblingBit::Zero => array::from_fn(|i| block_hi[i].into()),
+                                SiblingBit::One => array::from_fn(|i| block_lo[i].into()),
                             };
                             SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
                         };

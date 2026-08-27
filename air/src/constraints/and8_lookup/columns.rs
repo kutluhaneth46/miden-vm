@@ -18,38 +18,38 @@ pub const BYTE_PAIR_ROWS: usize = 1 << (2 * BITS_PER_BYTE);
 /// Ordinary `a & b` lookup kind.
 pub const BYTE_LOOKUP_KIND_AND8: usize = 0;
 
-/// BlakeG rot12 contribution lookup kind for byte position 0.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS0: usize = 1;
-/// BlakeG rot12 contribution lookup kind for byte position 1.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS1: usize = 2;
-/// BlakeG rot12 contribution lookup kind for byte position 2.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS2: usize = 3;
-/// BlakeG rot12 contribution lookup kind for byte position 3.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS3: usize = 4;
+/// Eidos compression rot12 contribution lookup kind for byte position 0.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS0: usize = 1;
+/// Eidos compression rot12 contribution lookup kind for byte position 1.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS1: usize = 2;
+/// Eidos compression rot12 contribution lookup kind for byte position 2.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS2: usize = 3;
+/// Eidos compression rot12 contribution lookup kind for byte position 3.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS3: usize = 4;
 
-/// BlakeG rot7 contribution lookup kind for byte position 0.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS0: usize = 5;
-/// BlakeG rot7 contribution lookup kind for byte position 1.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS1: usize = 6;
-/// BlakeG rot7 contribution lookup kind for byte position 2.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS2: usize = 7;
-/// BlakeG rot7 contribution lookup kind for byte position 3.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS3: usize = 8;
+/// Eidos compression rot7 contribution lookup kind for byte position 0.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS0: usize = 5;
+/// Eidos compression rot7 contribution lookup kind for byte position 1.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS1: usize = 6;
+/// Eidos compression rot7 contribution lookup kind for byte position 2.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS2: usize = 7;
+/// Eidos compression rot7 contribution lookup kind for byte position 3.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS3: usize = 8;
 
-/// BlakeG rot12 contribution lookup kinds by byte position.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT12: [usize; BYTE_LOOKUP_ROTATION_POSITIONS] = [
-    BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS0,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS1,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS2,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS3,
+/// Eidos compression rot12 contribution lookup kinds by byte position.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12: [usize; BYTE_LOOKUP_ROTATION_POSITIONS] = [
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS0,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS1,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS2,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS3,
 ];
 
-/// BlakeG rot7 contribution lookup kinds by byte position.
-pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7: [usize; BYTE_LOOKUP_ROTATION_POSITIONS] = [
-    BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS0,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS1,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS2,
-    BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS3,
+/// Eidos compression rot7 contribution lookup kinds by byte position.
+pub const BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7: [usize; BYTE_LOOKUP_ROTATION_POSITIONS] = [
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS0,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS1,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS2,
+    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS3,
 ];
 
 /// Number of byte-pair lookup kinds represented in the table.
@@ -161,7 +161,7 @@ impl And8LookupPreprocessedCols<Felt> {
     /// Builds the fixed byte-pair table.
     ///
     /// The row order is `(a << 8) + b`. Each row serves ordinary byte AND, the
-    /// eight BlakeG rotation-contribution buses, and the range-check table side for
+    /// eight Eidos compression rotation-contribution buses, and the range-check table side for
     /// `value = 256 * a + b`. A rotation contribution is the u32 value obtained by placing
     /// `(a xor b)` at one byte position and rotating the word by 12 or 7 bits.
     pub fn preprocessed_trace() -> RowMajorMatrix<Felt> {
@@ -173,10 +173,10 @@ impl And8LookupPreprocessedCols<Felt> {
                 values.push(Felt::from_u32(a));
                 values.push(Felt::from_u32(b));
                 values.push(Felt::from_u32(and));
-                for kind in BYTE_LOOKUP_KIND_BLAKEG_ROT12 {
+                for kind in BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12 {
                     values.push(Felt::from_u32(byte_lookup_result(kind, a as u8, b as u8)));
                 }
-                for kind in BYTE_LOOKUP_KIND_BLAKEG_ROT7 {
+                for kind in BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7 {
                     values.push(Felt::from_u32(byte_lookup_result(kind, a as u8, b as u8)));
                 }
             }
@@ -194,20 +194,41 @@ impl And8LookupPreprocessedCols<Felt> {
 pub const fn byte_lookup_result(kind: usize, a: u8, b: u8) -> u32 {
     match kind {
         BYTE_LOOKUP_KIND_AND8 => (a & b) as u32,
-        BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS0 => blakeg_rotation_contribution(0, a, b, 12),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS1 => blakeg_rotation_contribution(1, a, b, 12),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS2 => blakeg_rotation_contribution(2, a, b, 12),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT12_POS3 => blakeg_rotation_contribution(3, a, b, 12),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS0 => blakeg_rotation_contribution(0, a, b, 7),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS1 => blakeg_rotation_contribution(1, a, b, 7),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS2 => blakeg_rotation_contribution(2, a, b, 7),
-        BYTE_LOOKUP_KIND_BLAKEG_ROT7_POS3 => blakeg_rotation_contribution(3, a, b, 7),
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS0 => {
+            eidos_compression_rotation_contribution(0, a, b, 12)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS1 => {
+            eidos_compression_rotation_contribution(1, a, b, 12)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS2 => {
+            eidos_compression_rotation_contribution(2, a, b, 12)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12_POS3 => {
+            eidos_compression_rotation_contribution(3, a, b, 12)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS0 => {
+            eidos_compression_rotation_contribution(0, a, b, 7)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS1 => {
+            eidos_compression_rotation_contribution(1, a, b, 7)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS2 => {
+            eidos_compression_rotation_contribution(2, a, b, 7)
+        },
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7_POS3 => {
+            eidos_compression_rotation_contribution(3, a, b, 7)
+        },
         _ => panic!("byte lookup kind is out of range"),
     }
 }
 
 #[inline]
-pub(crate) const fn blakeg_rotation_contribution(byte_pos: usize, a: u8, b: u8, rot: u32) -> u32 {
+pub(crate) const fn eidos_compression_rotation_contribution(
+    byte_pos: usize,
+    a: u8,
+    b: u8,
+    rot: u32,
+) -> u32 {
     if byte_pos >= 4 {
         panic!("byte position must be in 0..4");
     }
@@ -242,10 +263,10 @@ mod tests {
             let values = trace.row_slice(row).expect("real byte-pair row is present");
             let mut expected =
                 alloc::vec![Felt::from_u32(a), Felt::from_u32(b), Felt::from_u32(and),];
-            for kind in BYTE_LOOKUP_KIND_BLAKEG_ROT12 {
+            for kind in BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12 {
                 expected.push(Felt::from_u32(byte_lookup_result(kind, a as u8, b as u8)));
             }
-            for kind in BYTE_LOOKUP_KIND_BLAKEG_ROT7 {
+            for kind in BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7 {
                 expected.push(Felt::from_u32(byte_lookup_result(kind, a as u8, b as u8)));
             }
             assert_eq!(&*values, expected.as_slice());
@@ -255,11 +276,11 @@ mod tests {
     #[test]
     fn rotation_contributions_sum_to_rotated_byte_xor_word() {
         for (a, b) in [(0u8, 0u8), (0xf0, 0x0f), (0x53, 0xa9), (0xff, 0x80)] {
-            let rot12 = BYTE_LOOKUP_KIND_BLAKEG_ROT12
+            let rot12 = BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12
                 .into_iter()
                 .map(|kind| byte_lookup_result(kind, a, b))
                 .sum::<u32>();
-            let rot7 = BYTE_LOOKUP_KIND_BLAKEG_ROT7
+            let rot7 = BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7
                 .into_iter()
                 .map(|kind| byte_lookup_result(kind, a, b))
                 .sum::<u32>();

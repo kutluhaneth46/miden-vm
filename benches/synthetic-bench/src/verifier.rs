@@ -2,16 +2,13 @@
 //!
 //! Hard checks:
 //! - `padded_core(actual) == padded_core(target)`
-//! - `padded_and8_lookup(actual) == padded_and8_lookup(target)` when the snapshot contains a
-//!   per-AIR BlakeG target.
-//! - `padded_chiplets(actual) == padded_chiplets(target)` when the snapshot contains a per-AIR
-//!   BlakeG target.
-//! - `padded_blakeg_compression(actual) == padded_blakeg_compression(target)` when the snapshot
-//!   contains a per-AIR BlakeG target.
+//! - `padded_and8_lookup(actual) == padded_and8_lookup(target)`
+//! - `padded_chiplets(actual) == padded_chiplets(target)`
+//! - `padded_eidos_compression(actual) == padded_eidos_compression(target)`
 //! - `padded_total(actual) == padded_total(target)`
 //!
 //! Soft reporting:
-//! - unpadded totals (`core_rows`, `chiplets_rows`, `blakeg_compression_rows`) within
+//! - unpadded totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`) within
 //!   [`PER_COMPONENT_TOLERANCE`]
 //! - advisory breakdown deltas (info only)
 
@@ -53,17 +50,6 @@ pub struct ComponentDelta {
 
 impl VerificationReport {
     pub fn new(target: TraceShape, actual: TraceShape) -> Self {
-        let has_blakeg_target = target.totals.has_blakeg_compression_target();
-        let chiplets_status = if has_blakeg_target {
-            DeltaStatus::Enforced
-        } else {
-            DeltaStatus::Informational
-        };
-        let blakeg_status = if has_blakeg_target {
-            DeltaStatus::Enforced
-        } else {
-            DeltaStatus::Informational
-        };
         let total_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
                 "core_rows",
@@ -75,13 +61,13 @@ impl VerificationReport {
                 "chiplets_rows",
                 target.totals.chiplets_rows,
                 actual.totals.chiplets_rows,
-                chiplets_status,
+                DeltaStatus::Enforced,
             ),
             (
-                "blakeg_rows",
-                target.totals.blakeg_compression_rows,
-                actual.totals.blakeg_compression_rows,
-                blakeg_status,
+                "eidos_compression_rows",
+                target.totals.eidos_compression_rows,
+                actual.totals.eidos_compression_rows,
+                DeltaStatus::Enforced,
             ),
             (
                 // byte_pair_lookup_rows is derived, not independently driven.
@@ -93,9 +79,9 @@ impl VerificationReport {
         ];
         let breakdown_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
-                "hasher",
-                target.hasher_work_rows(),
-                actual.hasher_work_rows(),
+                "controller_hasher",
+                target.breakdown.hasher_rows,
+                actual.breakdown.hasher_rows,
                 DeltaStatus::Informational,
             ),
             (
@@ -121,19 +107,11 @@ impl VerificationReport {
 
     /// True when all available padded proxies match their targets exactly.
     pub fn brackets_match(&self) -> bool {
-        let has_blakeg_target = self.target.totals.has_blakeg_compression_target();
-        let chiplets_matches = !has_blakeg_target
-            || self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets();
-        let blakeg_matches = !has_blakeg_target
-            || self.target.totals.padded_blakeg_compression()
-                == self.actual.totals.padded_blakeg_compression();
-        let and8_matches = !has_blakeg_target
-            || self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup();
-
         self.target.totals.padded_core() == self.actual.totals.padded_core()
-            && and8_matches
-            && chiplets_matches
-            && blakeg_matches
+            && self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup()
+            && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
+            && self.target.totals.padded_eidos_compression()
+                == self.actual.totals.padded_eidos_compression()
             && self.target.totals.padded_total() == self.actual.totals.padded_total()
     }
 }
@@ -163,26 +141,24 @@ impl Display for VerificationReport {
             self.target.totals.padded_core(),
             self.actual.totals.padded_core(),
         )?;
-        if self.target.totals.has_blakeg_compression_target() {
-            write_bracket_row(
-                f,
-                "padded_and8",
-                self.target.totals.padded_and8_lookup(),
-                self.actual.totals.padded_and8_lookup(),
-            )?;
-            write_bracket_row(
-                f,
-                "padded_chiplets",
-                self.target.totals.padded_chiplets(),
-                self.actual.totals.padded_chiplets(),
-            )?;
-            write_bracket_row(
-                f,
-                "padded_blakeg",
-                self.target.totals.padded_blakeg_compression(),
-                self.actual.totals.padded_blakeg_compression(),
-            )?;
-        }
+        write_bracket_row(
+            f,
+            "padded_and8",
+            self.target.totals.padded_and8_lookup(),
+            self.actual.totals.padded_and8_lookup(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_chiplets",
+            self.target.totals.padded_chiplets(),
+            self.actual.totals.padded_chiplets(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_eidos_compression",
+            self.target.totals.padded_eidos_compression(),
+            self.actual.totals.padded_eidos_compression(),
+        )?;
         write_bracket_row(
             f,
             "padded_total",
@@ -269,7 +245,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: core,
             chiplets_rows: breakdown.chiplets_sum(),
-            blakeg_compression_rows: hasher,
+            eidos_compression_rows: hasher,
             byte_pair_lookup_rows: 0,
         };
         TraceShape::new(totals, breakdown)
@@ -310,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn blakeg_bracket_can_miss_independently_of_core_and_chiplets() {
+    fn eidos_compression_bracket_can_miss_independently_of_core_and_chiplets() {
         let target = shape(40000, 8000, 1000);
         let actual = shape(40000, 9000, 1000);
         let r = VerificationReport::new(target, actual);
@@ -318,10 +294,23 @@ mod tests {
         assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
         assert_eq!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
         assert_ne!(
-            target.totals.padded_blakeg_compression(),
-            actual.totals.padded_blakeg_compression()
+            target.totals.padded_eidos_compression(),
+            actual.totals.padded_eidos_compression()
         );
         assert!(!r.brackets_match());
+    }
+
+    #[test]
+    fn zero_eidos_compression_target_is_still_a_hard_bracket() {
+        let mut target = shape(40_000, 8_000, 1_000);
+        let mut actual = target;
+        target.totals.eidos_compression_rows = 0;
+        actual.totals.eidos_compression_rows = 128;
+        let report = VerificationReport::new(target, actual);
+
+        assert_eq!(target.totals.padded_eidos_compression(), 64);
+        assert_eq!(actual.totals.padded_eidos_compression(), 128);
+        assert!(!report.brackets_match());
     }
 
     #[test]
@@ -339,82 +328,28 @@ mod tests {
     }
 
     #[test]
-    fn missing_blakeg_target_uses_chiplet_hasher_rows() {
-        let breakdown = TraceBreakdown {
-            hasher_rows: 8000,
-            bitwise_rows: 0,
-            memory_rows: 1000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let target = TraceShape::new(
-            TraceTotals {
-                core_rows: 40000,
-                chiplets_rows: breakdown.chiplets_sum(),
-                blakeg_compression_rows: 0,
-                byte_pair_lookup_rows: 0,
-            },
-            breakdown,
-        );
-        let actual = shape(40000, 8000, 1000);
-        let r = VerificationReport::new(target, actual);
-
-        assert!(r.brackets_match());
-    }
-
-    #[test]
-    fn chiplets_bracket_miss_is_info_without_blakeg_target() {
-        let target_breakdown = TraceBreakdown {
-            hasher_rows: 16_000,
-            bitwise_rows: 0,
-            memory_rows: 16_000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let actual_breakdown = TraceBreakdown {
-            hasher_rows: 32_000,
-            bitwise_rows: 0,
-            memory_rows: 32_000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let target = TraceShape::new(
-            TraceTotals {
-                core_rows: 100_000,
-                chiplets_rows: target_breakdown.chiplets_sum(),
-                blakeg_compression_rows: 0,
-                byte_pair_lookup_rows: 0,
-            },
-            target_breakdown,
-        );
-        let actual = TraceShape::new(
-            TraceTotals {
-                core_rows: 100_000,
-                chiplets_rows: actual_breakdown.chiplets_sum(),
-                blakeg_compression_rows: 0,
-                byte_pair_lookup_rows: 0,
-            },
-            actual_breakdown,
-        );
-        let r = VerificationReport::new(target, actual);
-
-        assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
-        assert_eq!(target.totals.padded_total(), actual.totals.padded_total());
-        assert_ne!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
-        assert!(r.brackets_match());
-
-        let chiplets_delta = r.total_deltas.iter().find(|d| d.name == "chiplets_rows").unwrap();
-        assert_eq!(chiplets_delta.status, DeltaStatus::Informational);
-    }
-
-    #[test]
     fn per_component_overshoot_stays_within_bracket() {
-        // Hasher overshoots but every padded AIR bracket stays unchanged.
+        // Eidos compression overshoots but every padded AIR bracket stays unchanged.
         let target = shape(68000, 8000, 12000);
         let actual = shape(68000, 8191, 12000);
         let r = VerificationReport::new(target, actual);
         assert!(r.brackets_match());
-        let hasher_delta = r.breakdown_deltas.iter().find(|d| d.name == "hasher").unwrap();
-        assert!(!hasher_delta.within_tolerance);
+        let compression_delta =
+            r.total_deltas.iter().find(|d| d.name == "eidos_compression_rows").unwrap();
+        assert!(!compression_delta.within_tolerance);
+    }
+
+    #[test]
+    fn controller_hasher_rows_are_advisory_and_distinct_from_compression_rows() {
+        let target = shape(68_000, 8_000, 12_000);
+        let mut actual = target;
+        actual.breakdown.hasher_rows = 9_000;
+        let report = VerificationReport::new(target, actual);
+
+        assert!(report.brackets_match());
+        let controller_delta =
+            report.breakdown_deltas.iter().find(|d| d.name == "controller_hasher").unwrap();
+        assert_eq!(controller_delta.status, DeltaStatus::Informational);
+        assert!(!controller_delta.within_tolerance);
     }
 }

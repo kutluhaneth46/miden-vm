@@ -505,13 +505,13 @@ impl Node {
                 logical_len,
             );
             for chunk in chunks {
-                cv = Eidos::compress_block(cv, *chunk);
+                cv = Eidos::compress(cv, *chunk);
             }
             return cv;
         }
 
         // Precompile-owned nodes use a streaming construction which leaves each 8-felt payload
-        // chunk aligned for the VM's `mem_stream; bcompress` path. The logical length binds the
+        // chunk aligned for the VM's `mem_stream; compress` path. The logical length binds the
         // four tag felts plus every payload felt; after the payload, a final `tag || 0w` block
         // binds the complete (potentially full-field) tag without trying to encode it as a
         // 31-bit Eidos domain selector.
@@ -522,11 +522,11 @@ impl Node {
         let mut cv =
             Eidos::init_chaining_word(DEFERRED_NODE_DOMAIN.as_canonical_u64() as u32, logical_len);
         for chunk in chunks {
-            cv = Eidos::compress_block(cv, *chunk);
+            cv = Eidos::compress(cv, *chunk);
         }
         let mut tag_block = [ZERO; Self::DATA_CHUNK_FELT_LEN];
         tag_block[..Tag::FELT_LEN].copy_from_slice(&self.tag.as_word());
-        Eidos::compress_block(cv, tag_block)
+        Eidos::compress(cv, tag_block)
     }
 }
 

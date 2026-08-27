@@ -4,8 +4,9 @@
 //! all sharing one LogUp column.
 //!
 //! Hasher operation-init responses are gated on the single-row controller selector encoding.
-//! Final hasher digest returns live in a dedicated lookup column, because a final controller row
-//! may emit both an init response and a return response.
+//! Four-Felt hasher returns live in a dedicated lookup column, because a final controller row may
+//! emit both an init response and a return response. Those returns are completed digests for framed
+//! hashes and updated chaining values for raw compression.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
 //! rather than splitting into four per-label variants. This keeps the response-column
@@ -91,12 +92,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let merkle_start: LB::Expr = ctrl.merkle_is_start().into();
 
     let state: [LB::Var; 12] = ctrl.state;
-    let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
+    let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
 
     // --- Hasher response flags ---
-    let f_sponge_start: LB::Expr = hash_gate.clone() * hs0;
-    let f_sponge_respan: LB::Expr = hash_gate * not_hs0;
+    let f_hash_start: LB::Expr = hash_gate.clone() * hs0;
+    let f_hash_continue: LB::Expr = hash_gate * not_hs0;
     let f_mp: LB::Expr = merkle_gate.clone() * not_hs1 * hs2.clone() * merkle_start.clone();
     let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * not_hs2 * merkle_start.clone();
     let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
@@ -117,8 +118,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // Local helpers: convert the copied Var arrays into Expr arrays.
     let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
-    let full_rate = || -> [LB::Expr; 8] {
-        array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() })
+    let full_block = || -> [LB::Expr; 8] {
+        array::from_fn(|i| {
+            if i < 4 {
+                block_lo[i].into()
+            } else {
+                block_hi[i - 4].into()
+            }
+        })
     };
 
     builder.next_column(
@@ -126,10 +133,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
             col.group(
                 "chiplet_responses",
                 |g| {
-                    // Sponge start: full 12-lane state, node_index = 0.
+                    // Hash start: full 12-Felt compression state, node_index = 0.
                     g.add(
-                        "sponge_start",
-                        f_sponge_start,
+                        "hash_start",
+                        f_hash_start,
                         || HasherMsg {
                             kind: BusId::HasherLinearHashInit,
                             addr: row_addr.clone(),
@@ -139,15 +146,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // Sponge RESPAN: rate-only 8 lanes, node_index = 0.
+                    // Hash continuation: next 8-Felt block, node_index = 0.
                     g.add(
-                        "sponge_respan",
-                        f_sponge_respan,
+                        "hash_continue",
+                        f_hash_continue,
                         || HasherMsg {
                             kind: BusId::HasherAbsorption,
                             addr: row_addr.clone(),
                             node_index: LB::Expr::ZERO,
-                            payload: HasherPayload::Rate(full_rate()),
+                            payload: HasherPayload::Block(full_block()),
                         },
                         Deg { v: 5, u: 6 },
                     );
@@ -170,8 +177,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                         .double();
                                 let one_minus_bit = bit.not();
                                 let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                    one_minus_bit.clone() * rate_0[i].into()
-                                        + bit.clone() * rate_1[i].into()
+                                    one_minus_bit.clone() * block_lo[i].into()
+                                        + bit.clone() * block_hi[i].into()
                                 });
                                 HasherMsg {
                                     kind,

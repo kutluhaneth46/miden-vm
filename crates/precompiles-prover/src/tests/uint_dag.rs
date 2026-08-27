@@ -7,7 +7,7 @@
 //! lands equal values on one ptr. Around it: node dedup / `out_mult`
 //! accounting, the stray-claim policy, and the forgeries the pointered
 //! relations must catch (a forged result ptr; a re-encoded op id that
-//! passes every local constraint and dies on the Eidos cap bus).
+//! passes every local constraint and dies on the Eidos chain-context bus).
 
 use miden_air::lookup::Challenges;
 use miden_core::{
@@ -277,9 +277,9 @@ fn forged_result_ptr_unbalances() {
 
 /// Re-encoding an op's discriminant — flag *and* `tag_arg0` swapped
 /// consistently from `Add` to `Sub` — passes every local constraint
-/// (the one-hot, the cap materialization, the ptr pins). What rejects it
-/// is the bus: the row's cap message no longer matches the Eidos
-/// perm that produced its hash, and the `UintAdd` consume re-wires to a
+/// (the one-hot, the context materialization, the ptr pins). What rejects it
+/// is the bus: the row's chain-context message no longer matches the Eidos
+/// compression that produced its hash, and the `UintAdd` consume re-wires to a
 /// tuple no chiplet proved. The op id lives in the *hash*, not in local
 /// algebra.
 #[test]
@@ -308,7 +308,7 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     // local check needs the honest transcript root it pins in row 0).
     crate::tests::check_local_inputs(TranscriptEvalAir, &tampered, traces.air_inputs());
 
-    // …but the bus refuses the re-encoded cap + re-wired relation.
+    // …but the bus refuses the re-encoded context + re-wired relation.
     let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
     mains[4] = &composite;

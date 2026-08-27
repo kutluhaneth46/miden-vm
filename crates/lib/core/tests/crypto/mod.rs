@@ -1,7 +1,7 @@
 mod dsa;
 mod falcon;
 
-mod aead_blakeg;
+mod aead_eidos;
 mod blake3;
 mod circuit_evaluation;
 mod eidos;

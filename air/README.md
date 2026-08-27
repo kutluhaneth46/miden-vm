@@ -9,8 +9,8 @@ Miden VM is a four-AIR statement:
   [stack](https://docs.miden.xyz/miden-vm/design/stack), and system constraints.
 * `ChipletsAir` contains the stacked hash controller, bitwise, memory, ACE, and kernel-ROM
   chiplets.
-* `BlakeGCompressionAir` proves the 32-row BlakeG computations requested by the hash controller.
-* `And8LookupAir` is a fixed byte-pair table for byte AND, BlakeG rotation contributions, and
+* `EidosCompressionAir` proves the 32-row Eidos compression computations requested by the hash controller.
+* `And8LookupAir` is a fixed byte-pair table for byte AND, Eidos compression rotation contributions, and
   [16-bit range checks](https://docs.miden.xyz/miden-vm/design/range).
 
 These AIRs and their internal components are tied together with typed LogUp relations.

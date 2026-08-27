@@ -69,7 +69,7 @@ pub fn handle_system_event(
             insert_hdword_into_adv_map(processor, domain)
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
-        SystemEvent::BCompressToMap => insert_bcompress_into_adv_map(processor),
+        SystemEvent::CompressToMap => insert_compress_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
         SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
         SystemEvent::DeferredEvaluateTag => handle_deferred_evaluate_tag(processor),
@@ -202,7 +202,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 }
 
 /// Reads three words from the operand stack and inserts the two block words into the advice map
-/// under the key defined by applying `bcompress` to all three words.
+/// under the key `Eidos::compress(CV, BLOCK_LO || BLOCK_HI)`.
 ///
 /// ```text
 /// Inputs:
@@ -213,9 +213,8 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 ///   Advice map: {KEY: [BLOCK_LO, BLOCK_HI]} (8 block elements)
 /// ```
 ///
-/// Where `KEY` is the updated chaining value produced by applying `bcompress` to
-/// `[BLOCK_LO, BLOCK_HI, CV]`.
-fn insert_bcompress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+/// `KEY` is the updated chaining value.
+fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [BLOCK_LO, BLOCK_HI, CV] where BLOCK_LO is at positions 1-4.
     let mut state = [
@@ -234,14 +233,14 @@ fn insert_bcompress_into_adv_map(processor: &mut FastProcessor) -> Result<(), Sy
     ];
 
     // Preserve the two input block words (the first 8 elements) as the mapped values.
-    let values = state[..VmHasher::RATE_LEN].to_vec();
+    let values = state[..VmHasher::BLOCK_LEN].to_vec();
 
-    // Apply the VM hasher and extract the digest as the key.
+    // Apply one compression and extract the updated chaining value as the key.
     compress_state(&mut state);
     let key = Word::new(
-        state[VmHasher::DIGEST_RANGE]
+        state[VmHasher::CV_RANGE]
             .try_into()
-            .expect("failed to extract digest from state"),
+            .expect("failed to extract chaining value from state"),
     );
 
     processor.advice.insert_into_map(key, values)?;
@@ -552,10 +551,10 @@ mod tests {
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
 
-    /// Tests that `insert_bcompress_into_adv_map` produces the same key as compressing the same
+    /// Tests that `insert_compress_into_adv_map` produces the same key as compressing the same
     /// state directly, and stores the two block words (first 8 elements) as the values.
     #[test]
-    fn insert_bcompress_into_adv_map_consistent_with_compression() {
+    fn insert_compress_into_adv_map_consistent_with_compression() {
         // Build a 12-element state with distinct values.
         let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new_unchecked((i + 1) as u64));
 
@@ -568,19 +567,17 @@ mod tests {
         let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
 
         // Call the handler under test.
-        insert_bcompress_into_adv_map(&mut processor).unwrap();
+        insert_compress_into_adv_map(&mut processor).unwrap();
 
         // Compute the expected key by compressing the same state.
         let mut expected_state_after_compression = state_felts;
         compress_state(&mut expected_state_after_compression);
         let expected_key = Word::new(
-            expected_state_after_compression[hasher::Hasher::DIGEST_RANGE]
-                .try_into()
-                .unwrap(),
+            expected_state_after_compression[hasher::Hasher::CV_RANGE].try_into().unwrap(),
         );
 
         // The expected values are the two block words (first 8 elements) of the input state.
-        let expected_values = state_felts[..hasher::Hasher::RATE_LEN].to_vec();
+        let expected_values = state_felts[..hasher::Hasher::BLOCK_LEN].to_vec();
 
         // Verify the advice map contains the correct entry.
         let stored_values = processor

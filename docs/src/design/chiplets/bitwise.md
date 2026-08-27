@@ -43,7 +43,7 @@ values without an eight-row bit-decomposition cycle.
 
 ## AEAD stream overlay
 
-`CRYPTOSTREAM` encrypts eight field elements with sixteen u32 lanes from one BlakeG-XOF counter
+`CRYPTOSTREAM` encrypts eight field elements with sixteen u32 lanes from one Eidos XOF counter
 block. It is represented by two eight-row stream entries; each entry handles one four-element
 plaintext word and eight keystream lanes. A field element is canonically unpacked as
 
@@ -67,7 +67,7 @@ u32 XOR through four And8 lookups. The phases are:
 The two four-row halves cover two plaintext elements each. Typed relations bind each entry to:
 
 - the core `CRYPTOSTREAM` request `(ctx, clk, src_ptr, dst_ptr, lane_base)`;
-- the BlakeG-XOF output pairs carrying the sixteen keystream lanes;
+- the Eidos XOF output pairs carrying the sixteen keystream lanes;
 - two copies of its memory-word read and two memory-word writes; and
 - 32 byte-level And8 lookups.
 

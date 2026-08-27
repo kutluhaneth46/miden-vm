@@ -201,7 +201,7 @@ fn test_hash_heavy_divergent_heights() {
         begin
             padw padw padw
             repeat.20
-                bcompress
+                compress
             end
             dropw dropw dropw
         end
@@ -209,15 +209,15 @@ fn test_hash_heavy_divergent_heights() {
     assert_prove_verify(source, HashFunction::Blake3_256, "Blake3", false, false);
 }
 
-/// Exercises the MASM recursive verifier when the BlakeG compression AIR is taller than the core
-/// trace.
+/// Exercises the MASM recursive verifier when the Eidos compression AIR is taller than
+/// the core trace.
 #[test]
 fn test_hash_heavy_divergent_heights_recursive() {
     let source = "
         begin
             padw padw padw
             repeat.20
-                bcompress
+                compress
             end
             dropw dropw dropw
         end
@@ -392,9 +392,9 @@ mod prover_api_lifecycle {
                  adv.register_deferred\n\
                  push.DEFERRED_NODE_DOMAIN push.12 exec.init_deferred_cv\n\
                  movdnw.2\n\
-                 bcompress\n\
+                 compress\n\
                  dropw dropw\n\
-                 swapw padw swapw bcompress\n\
+                 swapw padw swapw compress\n\
                  dropw dropw\n\
                  padw padw movdnw.2\n\
                  log_deferred\n\

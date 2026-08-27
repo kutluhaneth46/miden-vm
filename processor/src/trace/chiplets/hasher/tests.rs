@@ -2,15 +2,15 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::{
-    blakeg_compression::{
-        BLAKEG_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_HIGH_EVEN_SLOT_BASE,
-        F_HIGH_ODD_SLOT_BASE, FOOTER_START, NUM_BLAKEG_COMPRESSION_COLS,
-        TraceMode as BlakeGCompressionTraceMode, footer_interface_tail_col, footer_msg_word_col,
-        footer_r_col, footer_xor_slot_col,
-        generate_felt_trace_block as generate_blakeg_felt_trace_block,
-        write_felt_trace_block as write_blakeg_felt_trace_block,
-    },
     chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
+    eidos_compression::{
+        EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_HIGH_EVEN_SLOT_BASE,
+        F_HIGH_ODD_SLOT_BASE, FOOTER_START, NUM_EIDOS_COMPRESSION_COLS,
+        TraceMode as EidosCompressionTraceMode, footer_interface_tail_col, footer_msg_word_col,
+        footer_r_col, footer_xor_slot_col,
+        generate_felt_trace_block as generate_eidos_compression_felt_trace_block,
+        write_felt_trace_block as write_eidos_compression_felt_trace_block,
+    },
 };
 
 // Chiplet-local column indices used by the hasher trace tests.
@@ -22,14 +22,14 @@ const IS_START_COL_IDX: usize = 17;
 const OP_FINAL_COL_IDX: usize = 19;
 const MRUPDATE_ID_COL_IDX: usize = 20;
 const CONTROLLER_MERKLE_OR_PADDING_COL_IDX: usize = TRACE_WIDTH - 1;
-const TEST_TRACE_WIDTH: usize = NUM_BLAKEG_COMPRESSION_COLS;
+const TEST_TRACE_WIDTH: usize = NUM_EIDOS_COMPRESSION_COLS;
 
 fn controller_len(controller_rows: usize) -> usize {
     controller_rows.next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
 }
 
 #[cfg(feature = "testing")]
-use miden_core::chiplets::blakeg;
+use miden_core::chiplets::eidos_compression;
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
@@ -40,21 +40,21 @@ use miden_core::{
 use miden_utils_testing::rand::rand_array;
 
 use super::{
-    ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
-    MR_UPDATE_OLD, MerklePath, RATE_LEN, Selectors, absorb_into_state, get_digest, init_state,
+    BLOCK_LEN, ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY,
+    MR_UPDATE_NEW, MR_UPDATE_OLD, MerklePath, Selectors, absorb_into_state, get_digest, init_state,
     init_state_from_words,
 };
 
-// SPONGE MODE TESTS
+// HASH AND COMPRESSION MODE TESTS
 // ================================================================================================
 
 #[test]
-fn hasher_bcompress_one() {
+fn hasher_compress_one() {
     // --- test one controller compression ---
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
 
-    let (addr, final_state) = hasher.bcompress(init_state);
+    let (addr, final_state) = hasher.compress(init_state);
     assert_eq!(ONE, addr);
 
     let expected_state = compress_state(init_state);
@@ -65,7 +65,7 @@ fn hasher_bcompress_one() {
     // Controller region: 1 row, padded to the chiplet alignment boundary.
     // Compression segment: one real compression cycle.
     let compression_start = controller_len(1);
-    assert_eq!(trace[0].len(), compression_start + BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
 
     check_controller_row(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO, ONE);
 
@@ -73,13 +73,13 @@ fn hasher_bcompress_one() {
 }
 
 #[test]
-fn hasher_bcompress_two() {
+fn hasher_compress_two() {
     let mut hasher = Hasher::default();
     let init_state1 = random_state_with_packed_cv();
     let init_state2 = random_state_with_packed_cv();
 
-    let (addr1, final_state1) = hasher.bcompress(init_state1);
-    let (addr2, final_state2) = hasher.bcompress(init_state2);
+    let (addr1, final_state1) = hasher.compress(init_state1);
+    let (addr2, final_state2) = hasher.compress(init_state2);
 
     assert_eq!(ONE, addr1);
     assert_eq!(Felt::from_u8(2), addr2);
@@ -92,7 +92,7 @@ fn hasher_bcompress_two() {
     // Controller region: two compression rows, padded to the chiplet alignment boundary.
     // Compression segment: two real compression cycles.
     let compression_start = controller_len(2);
-    assert_eq!(trace[0].len(), compression_start + 2 * BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + 2 * EIDOS_COMPRESSION_CYCLE_LEN);
 
     check_controller_row(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO, ONE);
     check_controller_row(&trace, 1, LINEAR_HASH, &init_state2, ZERO, ONE, ZERO, ZERO, ONE);
@@ -216,10 +216,10 @@ fn hasher_update_merkle_root() {
 
 #[test]
 fn compression_segment_structure() {
-    // One BCOMPRESS yields one compression block with multiplicity 1.
+    // One COMPRESS yields one compression block with multiplicity 1.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
-    let (addr, result) = hasher.bcompress(init_state);
+    let (addr, result) = hasher.compress(init_state);
 
     // Verify returned address and compressed state
     assert_eq!(addr, ONE, "first compression should start at address 1");
@@ -236,22 +236,25 @@ fn compression_segment_structure() {
 
 #[cfg(feature = "testing")]
 #[test]
-fn compression_writer_preserves_processor_blakeg_contract() {
+fn compression_writer_preserves_processor_eidos_compression_contract() {
     let init_state = random_state_with_packed_cv();
-    let block = blakeg::unpack_block(core::array::from_fn(|i| init_state[i]));
-    let cv = Digest::new(core::array::from_fn(|i| init_state[RATE_LEN + i]));
-    let h = blakeg::unpack_word(cv);
+    let block = eidos_compression::unpack_block(core::array::from_fn(|i| init_state[i]));
+    let cv = Digest::new(core::array::from_fn(|i| init_state[BLOCK_LEN + i]));
+    let h = eidos_compression::unpack_word(cv);
 
-    let mut rows = vec![[ZERO; NUM_BLAKEG_COMPRESSION_COLS]; BLAKEG_COMPRESSION_CYCLE_LEN];
-    let final_v = write_blakeg_felt_trace_block(
+    let mut rows = vec![[ZERO; NUM_EIDOS_COMPRESSION_COLS]; EIDOS_COMPRESSION_CYCLE_LEN];
+    let final_v = write_eidos_compression_felt_trace_block(
         &mut rows,
         block,
         h,
         0,
-        BlakeGCompressionTraceMode::Compression,
+        EidosCompressionTraceMode::Compression,
     );
-    let expected =
-        generate_blakeg_felt_trace_block(block, h, BlakeGCompressionTraceMode::Compression);
+    let expected = generate_eidos_compression_felt_trace_block(
+        block,
+        h,
+        EidosCompressionTraceMode::Compression,
+    );
 
     assert_eq!(rows.as_slice(), expected.rows.as_slice());
     assert_eq!(final_v, expected.final_v);
@@ -259,21 +262,21 @@ fn compression_writer_preserves_processor_blakeg_contract() {
     let packed_output: [Felt; 4] = core::array::from_fn(|i| {
         let lo = final_v[2 * i] ^ final_v[8 + 2 * i];
         let hi = final_v[2 * i + 1] ^ final_v[8 + 2 * i + 1];
-        blakeg::pack(lo, hi)
+        eidos_compression::pack(lo, hi)
     });
 
     let mut expected_state = init_state;
-    blakeg::compress_state(&mut expected_state);
-    assert_eq!(packed_output, core::array::from_fn(|i| expected_state[RATE_LEN + i]));
+    eidos_compression::compress_state(&mut expected_state);
+    assert_eq!(packed_output, core::array::from_fn(|i| expected_state[BLOCK_LEN + i]));
 }
 
 #[test]
 fn compression_deduplication() {
-    // Two identical BCOMPRESS inputs collapse to one compression block with multiplicity 2.
+    // Two identical COMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
-    let (addr1, result1) = hasher.bcompress(init_state);
-    let (addr2, result2) = hasher.bcompress(init_state); // same state
+    let (addr1, result1) = hasher.compress(init_state);
+    let (addr2, result2) = hasher.compress(init_state); // same state
 
     // Both should produce the same result but at different addresses
     assert_eq!(result1, result2, "same input should produce same output");
@@ -284,7 +287,7 @@ fn compression_deduplication() {
     // Controller: two compression rows, padded to the chiplet alignment boundary.
     // Compression segment: one real compression cycle.
     let compression_start = controller_len(2);
-    assert_eq!(trace[0].len(), compression_start + BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
 
     // Compression segment: multiplicity should be 2.
     assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
@@ -319,7 +322,7 @@ fn hash_memoization_control_blocks() {
     // Both calls produce one controller row each, but share compression requests.
     // Compression segment: one real compression cycle.
     let compression_start = controller_len(2);
-    assert_eq!(trace[0].len(), compression_start + BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
 
     // Compression segment has multiplicity 2 (two requests for same state)
     assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
@@ -350,7 +353,7 @@ fn hash_memoization_basic_blocks_single_batch() {
     // Single batch: one controller row per call, two rows total.
     // Compression segment: one real compression cycle.
     let compression_start = controller_len(2);
-    assert_eq!(trace[0].len(), compression_start + BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
 
     check_controller_row(
         &trace,
@@ -392,7 +395,7 @@ fn hash_memoization_basic_blocks_multi_batch() {
     // 3 batches -> 3 controller rows per call = 6 rows total.
     // Three real compression cycles.
     let compression_start = controller_len(6);
-    assert_eq!(trace[0].len(), compression_start + 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
+    assert_eq!(trace[0].len(), compression_start + 3 * EIDOS_COMPRESSION_CYCLE_LEN);
 
     assert_eq!([trace[0][0], trace[1][0], trace[2][0]], LINEAR_HASH);
     assert_eq!([trace[0][1], trace[1][1], trace[2][1]], super::HASH_ABSORB);
@@ -402,7 +405,7 @@ fn hash_memoization_basic_blocks_multi_batch() {
 
     // Compression segment: each of the 3 unique states should have multiplicity 2
     for i in 0..3 {
-        let cycle_start = compression_start + i * BLAKEG_COMPRESSION_CYCLE_LEN;
+        let cycle_start = compression_start + i * EIDOS_COMPRESSION_CYCLE_LEN;
         assert_eq!(
             compression_multiplicity(&trace, cycle_start),
             Felt::from_u8(2),
@@ -497,7 +500,7 @@ fn hash_memoization_basic_blocks_check() {
     // Verify that the appended cycles have correct multiplicities.
     let compression_start = controller_padded_len;
     let total_len = trace[0].len();
-    let num_compression_cycles = (total_len - compression_start) / BLAKEG_COMPRESSION_CYCLE_LEN;
+    let num_compression_cycles = (total_len - compression_start) / EIDOS_COMPRESSION_CYCLE_LEN;
 
     // We should have at least 5 compression cycles (2 from BB + 1 loop + 2 joins)
     assert!(
@@ -509,7 +512,7 @@ fn hash_memoization_basic_blocks_check() {
     let mut mult_2_count = 0;
     let mut mult_1_count = 0;
     for i in 0..num_compression_cycles {
-        let cycle_start = compression_start + i * BLAKEG_COMPRESSION_CYCLE_LEN;
+        let cycle_start = compression_start + i * EIDOS_COMPRESSION_CYCLE_LEN;
         let mult = compression_multiplicity(&trace, cycle_start);
         if mult == Felt::from_u8(2) {
             mult_2_count += 1;
@@ -536,12 +539,12 @@ fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let trace_len = controller_len + compression_len;
     let mut band = Felt::zero_vec(TEST_TRACE_WIDTH * trace_len);
     let mut controller_trace = Felt::zero_vec(TRACE_WIDTH * controller_len);
-    let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * compression_len);
+    let mut eidos_compression_trace = Felt::zero_vec(NUM_EIDOS_COMPRESSION_COLS * compression_len);
 
     {
         let mut fragment =
             ChipletTraceFragment::row_major(&mut controller_trace, TRACE_WIDTH, 0, TRACE_WIDTH);
-        hasher.fill_trace(&mut fragment, &mut blakeg_trace);
+        hasher.fill_trace(&mut fragment, &mut eidos_compression_trace);
     }
 
     for row in 0..controller_len {
@@ -552,9 +555,9 @@ fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
 
     for row in 0..compression_len {
         let dst = (controller_len + row) * TEST_TRACE_WIDTH;
-        let src = row * NUM_BLAKEG_COMPRESSION_COLS;
-        band[dst..dst + NUM_BLAKEG_COMPRESSION_COLS]
-            .copy_from_slice(&blakeg_trace[src..src + NUM_BLAKEG_COMPRESSION_COLS]);
+        let src = row * NUM_EIDOS_COMPRESSION_COLS;
+        band[dst..dst + NUM_EIDOS_COMPRESSION_COLS]
+            .copy_from_slice(&eidos_compression_trace[src..src + NUM_EIDOS_COMPRESSION_COLS]);
     }
 
     (0..TEST_TRACE_WIDTH)
@@ -674,7 +677,7 @@ fn is_merkle_selector(selectors: Selectors) -> bool {
     selectors == MP_VERIFY || selectors == MR_UPDATE_OLD || selectors == MR_UPDATE_NEW
 }
 
-/// Checks one BlakeG compression block in the combined test view.
+/// Checks one Eidos compression block in the combined test view.
 ///
 /// The packed schedule records the PRE-transition state on each row:
 fn check_compression_block(
@@ -697,13 +700,13 @@ fn compression_input_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState
     core::array::from_fn(|i| {
         if i < 6 {
             trace[footer_r_col(3, i)][footer3]
-        } else if i < RATE_LEN {
+        } else if i < BLOCK_LEN {
             let pair = i - 6;
             let lo = trace[footer_msg_word_col(2 * pair)][footer3];
             let hi = trace[footer_msg_word_col(2 * pair + 1)][footer3];
             lo + Felt::new_unchecked(1 << 32) * hi
         } else {
-            let footer = i - RATE_LEN;
+            let footer = i - BLOCK_LEN;
             footer_cv_pair(trace, start_row + FOOTER_START + footer)
         }
     })
@@ -714,13 +717,13 @@ fn compression_output_state(trace: &[Vec<Felt>], start_row: usize) -> HasherStat
     core::array::from_fn(|i| {
         if i < 6 {
             trace[footer_r_col(3, i)][footer3]
-        } else if i < RATE_LEN {
+        } else if i < BLOCK_LEN {
             let pair = i - 6;
             let lo = trace[footer_msg_word_col(2 * pair)][footer3];
             let hi = trace[footer_msg_word_col(2 * pair + 1)][footer3];
             lo + Felt::new_unchecked(1 << 32) * hi
         } else {
-            trace[footer_interface_tail_col(i - RATE_LEN)][footer3]
+            trace[footer_interface_tail_col(i - BLOCK_LEN)][footer3]
         }
     })
 }
@@ -742,7 +745,7 @@ fn compress_state(mut state: HasherState) -> HasherState {
 
 fn random_state_with_packed_cv() -> HasherState {
     let mut state: HasherState = rand_array();
-    for value in &mut state[RATE_LEN..] {
+    for value in &mut state[BLOCK_LEN..] {
         *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
     }
     state
@@ -859,5 +862,5 @@ fn num_basic_block_hash_groups(batches: &[OpBatch]) -> usize {
     let Some((last, prefix)) = batches.split_last() else {
         return 0;
     };
-    prefix.len() * RATE_LEN + last.num_groups().next_power_of_two()
+    prefix.len() * BLOCK_LEN + last.num_groups().next_power_of_two()
 }

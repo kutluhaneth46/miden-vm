@@ -41,9 +41,9 @@ use miden::core::sys::vm::layout
 # Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
 #   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
 # where CLAIM_HASH is the caller-provided execution-claim commitment, authenticated against
-# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs. With
-# RELATION_DIGEST pre-loaded in the transcript capacity by `init_seed`, the state after this block
-# realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs.
+# `init_seed` folds RELATION_DIGEST into the initial transcript chaining word, so the state after
+# this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
 # The raw stack i/o and kernel digests remain public values for the constraint checks and the
 # LogUp boundary without being separately absorbed.
 #
@@ -389,6 +389,6 @@ proc observe_miden_air_shape
     push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
     exec.layout::get_core_trace_length_log exec.random_coin::observe_felt
     exec.layout::get_chiplets_trace_length_log exec.random_coin::observe_felt
-    exec.layout::get_blakeg_compression_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_eidos_compression_trace_length_log exec.random_coin::observe_felt
     exec.layout::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
 end

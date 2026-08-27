@@ -261,7 +261,7 @@ _Insert into Advice Map:_
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
 | `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
-| `adv.insert_bcompress` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `K ← BlakeG(BLOCK_LO, BLOCK_HI, CV)`. `advice_map[K] ← [BLOCK_LO, BLOCK_HI]`. |
+| `adv.insert_compress` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `K ← Eidos::compress(CV, BLOCK_LO \|\| BLOCK_HI)`. `advice_map[K] ← [BLOCK_LO, BLOCK_HI]`. |
 
 ### Random Access Memory
 
@@ -277,7 +277,7 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
 | `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). Equivalent to `reversew mem_storew_le reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.  |
 | `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
-| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing the block words while preserving the BlakeG chaining word.                                                                       |
+| `mem_stream`                             | `[BLOCK_LO, BLOCK_HI, CV, a, ...]` | `[D, E, CV, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing the block words while preserving the Eidos chaining word.                                                                       |
 
 #### Procedure Locals (Context-Specific)
 
@@ -294,7 +294,7 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ to
 
 ## Cryptographic Operations
 
-Common cryptographic operations, including Eidos hashing, BlakeG compression, and Merkle tree
+Common cryptographic operations, including Eidos hashing, Eidos compression, and Merkle tree
 manipulations.
 
 ### Hashing and Merkle Trees
@@ -302,13 +302,13 @@ manipulations.
 | Instruction    | Stack Input          | Stack Output     | Cycles | Notes                                                                                                                                                                                                 |
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hash`         | `[A, ...]`           | `[B, ...]`       | 18     | `B ← Eidos::hash_elements(A)`. The exact 4-element length is bound into the initial chaining value. |
-| `bcompress`    | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV', ...]` | 1 | BlakeG compression. Preserves the 8-element block and replaces only the 4-element chaining value. |
+| `compress`    | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV', ...]` | 1 | Eidos compression. Preserves the 8-element block and replaces only the 4-element chaining value. |
 | `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 15     | Canonical Eidos two-to-one merge. |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 15     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
-| `crypto_stream` | `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]` | `[K_CTR(4), counter+1, src_ptr+8, dst_ptr+16, remaining-1, ...]` | 1 | Derives a BlakeG-XOF block, XORs it bytewise with 8 plaintext field elements, and writes 16 u32 ciphertext limbs. Primitive used by `miden::core::crypto::aead_blakeg`. |
+| `crypto_stream` | `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]` | `[K_CTR(4), counter+1, src_ptr+8, dst_ptr+16, remaining-1, ...]` | 1 | Derives an Eidos XOF block, XORs it bytewise with 8 plaintext field elements, and writes 16 u32 ciphertext limbs. Primitive used by `miden::core::crypto::aead_eidos`. |
 
 `mtree_get`, `mtree_set`, and `mtree_verify` require `1 <= d <= 64`; other depths are rejected.
 
@@ -383,7 +383,7 @@ Instructions for communicating with the host through events.
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Defined system events are reserved and use names in the `sys::` namespace.     |
 | `trace.<trace_id>` | `[...]`           | `[...]`           | 5      | Emits an optional, read-only trace event with the specified `trace_id`. Expands to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Immediate `trace_id` must be defined via `const.ID=event("...")` or inlined as `trace.event("...")`. The instruction is stack-neutral. Example: `trace.event("foo")` or `trace.MY_TRACE`. If no handler is registered for the trace ID, the event is a no-op. |
 | `trace`            | `[trace_id, ...]` | `[trace_id, ...]` | 3      | Emits an optional, read-only trace event using the `trace_id` at the top of the stack without consuming it. Expands to `push.<sys::trace_event> emit drop`. Trace handlers can inspect processor state but cannot mutate VM state or the advice provider. If no handler is registered for the trace ID, the event is a no-op. |
-| `log_deferred`   | `[_, STMNT, _, ...]` | `[ROOT_NEW, STMNT, _, ...]` | 1 | Folds `STMNT` from `stack[4..8]` into the rolling root with `ROOT_NEW = Eidos::compress_block(DEFERRED_ROOT_DOMAIN, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`. Only the top word is replaced; precompile support code normally wraps this low-level opcode. |
+| `log_deferred`   | `[_, STMNT, _, ...]` | `[ROOT_NEW, STMNT, _, ...]` | 1 | Folds `STMNT` from `stack[4..8]` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`. Only the top word is replaced; precompile support code normally wraps this low-level opcode. |
 
 ## Debugging Operations
 

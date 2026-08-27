@@ -5,15 +5,15 @@ use miden_utils_testing::{
 };
 
 #[test]
-fn bcompress() {
-    let asm_op = "bcompress";
+fn compress() {
+    let asm_op = "compress";
     let pub_inputs = rand_vector::<u64>(8);
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
 }
 
 #[test]
-fn bcompress_accepts_unmasked_input_cv() {
+fn compress_accepts_unmasked_input_cv() {
     let stack_inputs = [
         1,
         2,
@@ -29,7 +29,7 @@ fn bcompress_accepts_unmasked_input_cv() {
         0x8000_0003_0000_0004,
     ];
 
-    build_op_test!("bcompress", &stack_inputs).check_constraints();
+    build_op_test!("compress", &stack_inputs).check_constraints();
 }
 
 #[test]

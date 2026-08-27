@@ -32,8 +32,8 @@
 //!
 //! ## Hasher compression link (`BusId::HasherCompressionLink`)
 //!
-//! Binds hasher controller rows to the standalone BlakeG compression AIR. Without this bus a
-//! malicious prover could pair any controller `(state_in, state_out)` with any compression
+//! Binds hasher controller rows to the standalone Eidos compression AIR. Without this
+//! bus a malicious prover could pair any controller `(state_in, state_out)` with any compression
 //! execution (or skip the cycle entirely). The controller side emits one interaction per
 //! compression row:
 //!
@@ -42,7 +42,7 @@
 //! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
 //!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //!
-//! The BlakeG compression AIR emits the matching receive on the final footer row of the
+//! The Eidos compression AIR emits the matching receive on the final footer row of the
 //! standalone block.
 //!
 //! The compression-link gate has degree `(5, 6)`, below the ACE batch's `(8, 7)`.
@@ -50,13 +50,13 @@
 //!
 //! ## AEAD stream
 //!
-//! AEAD stream rows emit paired BlakeG-XOF output limbs. The first limb comes from the
+//! AEAD stream rows emit paired Eidos XOF output limbs. The first limb comes from the
 //! current stream row; the second comes from the next row, whose phase is constrained by the
 //! stream-row transition constraints. Request messages fire on phases 2 and 6.
 
 use core::{array, borrow::Borrow};
 
-use miden_core::{chiplets::blakeg, field::PrimeCharacteristicRing};
+use miden_core::{chiplets::eidos_compression, field::PrimeCharacteristicRing};
 
 use crate::{
     constraints::{
@@ -64,7 +64,8 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceWireMsg, AeadBlakeGOutputPairMsg, AeadStreamRequestMsg, HasherCompressionLinkMsg,
+                AceWireMsg, AeadEidosCompressionOutputPairMsg, AeadStreamRequestMsg,
+                HasherCompressionLinkMsg,
             },
         },
         utils::{BoolNot, pack_u32_bytes_le},
@@ -144,8 +145,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let f_merkle_compression = controller_flag * merkle_or_padding * ctrl_s0;
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
-    let ctrl_row_data: [LB::Var; 4] = ctrl.hash_digest();
-    let merkle_cv = blakeg::two_to_one_chaining_word(0);
+    let ctrl_row_data: [LB::Var; 4] = ctrl.hash_cv();
+    let merkle_cv = eidos_compression::two_to_one_chaining_word(0);
     let stream = local.aead_stream();
     let stream_next = next.aead_stream();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();
@@ -299,7 +300,7 @@ fn aead_stream_pair_msg<LB>(
     stream_next: &AeadStreamCols<LB::Var>,
     phase_idx: usize,
     first_lane_offset: u16,
-) -> AeadBlakeGOutputPairMsg<LB::Expr>
+) -> AeadEidosCompressionOutputPairMsg<LB::Expr>
 where
     LB: ChipletLookupBuilder,
 {
@@ -326,7 +327,7 @@ where
         },
         _ => unreachable!(),
     };
-    AeadBlakeGOutputPairMsg {
+    AeadEidosCompressionOutputPairMsg {
         clk,
         first_lane_idx: lane_base + LB::Expr::from_u16(first_lane_offset),
         value0,

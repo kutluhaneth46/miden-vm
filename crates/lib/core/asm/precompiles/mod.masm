@@ -59,8 +59,7 @@ end
 # NOTE: `register_value`, `register_mem`, and `log_deferred` are adapted from `miden::core::sys`
 # (crates/lib/core/asm/sys/mod.masm) so the internal `miden::precompiles` support namespace can be
 # assembled without depending on `miden-core`. This keeps the package dependency one-way because
-# `miden-core` depends on `miden-precompiles`. These helpers should be deduplicated against a single
-# shared source once the precompile proof-model migration settles.
+# `miden-core` depends on `miden-precompiles`; the copies must remain semantically synchronized.
 #
 # `register_value` / `register_mem` bind their registration inputs by deriving the node digest with
 # VM instructions from the exact same tag and payload. There is intentionally no `evaluate` proc
@@ -84,12 +83,12 @@ pub proc digest_expr
 
     # Compress the payload while leaving TAG immediately below the state.
     push.DEFERRED_NODE_DOMAIN push.12 exec.init_deferred_cv
-    movdnw.2 bcompress
+    movdnw.2 compress
     dropw dropw
-    # => [DIGEST, TAG, ...]
+    # => [CV', TAG, ...]
 
     # Bind the complete tag in a dedicated final block.
-    swapw padw swapw bcompress
+    swapw padw swapw compress
     dropw dropw
 end
 
@@ -116,7 +115,7 @@ pub proc register_value
     exec.register_expr
 end
 
-#! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! Registers a data-bodied node (`n` eight-Felt blocks of bulk data at `ptr`) in the
 #! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
 #! `adv.register_deferred_data` interns the node host-side by reading `8n` felts from memory at
@@ -133,7 +132,7 @@ pub proc register_mem
     adv.register_deferred_data
 
     # Retain n_chunks in one scalar local while keeping TAG on the operand stack. Avoid routing
-    # protocol words through local-memory word loads: the payload and tag then enter BCOMPRESS in
+    # protocol words through local-memory word loads: the payload and tag then enter COMPRESS in
     # exactly the same stack order as `digest_expr`.
     movup.5 loc_store.0
     # => [TAG, ptr, ...]
@@ -146,15 +145,15 @@ pub proc register_mem
     loc_load.0 mul.8 add.4 push.DEFERRED_NODE_DOMAIN swap exec.init_deferred_cv
     # => [CV, TAG, ptr, end_addr, ...]
 
-    # Move ptr/end_addr between CV and TAG, then add the two rate words.
+    # Move ptr/end_addr between CV and TAG, then add the two block words.
     movup.8 movup.9 movdn.5 movdn.4
     # => [CV, ptr, end_addr, TAG, ...]
     padw padw
-    # => [R0=0w, R1=0w, CV, ptr, end_addr, TAG, ...]
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_addr, TAG, ...]
 
     push.1
     while.true
-        mem_stream bcompress
+        mem_stream compress
         dup.13 dup.13 neq
     end
     dropw dropw
@@ -162,7 +161,7 @@ pub proc register_mem
     # => [DIGEST, TAG, ...]
 
     # Bind the tag after the aligned payload stream.
-    swapw padw swapw bcompress
+    swapw padw swapw compress
     dropw dropw
 end
 
@@ -188,11 +187,11 @@ pub proc register_chunks_mem
     # => [num_elements=8*n_chunks, domain, ptr, end_addr, ...]
     exec.init_deferred_cv
     padw padw
-    # => [R0=0w, R1=0w, C, ptr, end_addr, ...]
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_addr, ...]
 
     push.1
     while.true
-        mem_stream bcompress
+        mem_stream compress
         dup.13 dup.13 neq
     end
     dropw dropw

@@ -21,7 +21,9 @@ use crate::{
     primitives::byte_pair_lut::{BytePairLutAir, NUM_MAIN_COLS as BPL_MAIN_COLS},
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
     transcript::{
-        eidos::{BlakeGInterfaceAir, BlakeGNarrowAir, COL_BLAKEG_END},
+        eidos::{
+            COL_EIDOS_COMPRESSION_END, EidosCompressionInterfaceAir, EidosCompressionNarrowAir,
+        },
         eval::TranscriptEvalAir,
     },
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
@@ -123,12 +125,12 @@ pub(crate) fn session_stack_residual(
             ChipletAir::ChunkNodeSponge => {
                 fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
             },
-            ChipletAir::BlakeGCompression => {
-                fold_balance(&BlakeGInterfaceAir, main, challenges, &mut net);
-                let blakeg = extract_band(main, 0..COL_BLAKEG_END);
+            ChipletAir::EidosCompression => {
+                fold_balance(&EidosCompressionInterfaceAir, main, challenges, &mut net);
+                let eidos_compression = extract_band(main, 0..COL_EIDOS_COMPRESSION_END);
                 fold_balance_with_native_preprocessed(
-                    &BlakeGNarrowAir,
-                    &blakeg,
+                    &EidosCompressionNarrowAir,
+                    &eidos_compression,
                     &miden_challenges,
                     &mut net,
                 );

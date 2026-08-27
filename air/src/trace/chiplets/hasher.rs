@@ -2,7 +2,7 @@
 //!
 //! This module defines the structure of the hasher controller trace, including:
 //! - Trace selectors that determine which hash operation is being performed
-//! - State layout for BlakeG compression (`block[8] || cv[4]`)
+//! - State layout for Eidos compression (`block[8] || cv[4]`)
 //!
 //! The hasher chiplet supports several operations:
 //! - Linear hashing (absorbing arbitrary-length inputs)
@@ -31,20 +31,14 @@ pub type HasherState = [Felt; STATE_WIDTH];
 
 /// Number of field elements in the hasher state.
 ///
-/// BlakeG interprets the state as `[block_lo(4), block_hi(4), cv(4)]`.
+/// Eidos compression interprets the state as `[block_lo(4), block_hi(4), cv(4)]`.
 pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 
+/// Number of field elements in one compression block.
+pub const BLOCK_LEN: usize = 8;
+
 /// Number of field elements in the chaining-value portion of the hasher's state.
-pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
-
-/// Index of the second element in the chaining-value word.
-///
-/// Domain separation is encoded by the BlakeG chaining-word constructors, not by mutating this
-/// lane directly.
-pub const CAPACITY_DOMAIN_IDX: usize = 9;
-
-/// Number of field elements in the rate portion of the hasher's state.
-pub const RATE_LEN: usize = 8;
+pub const CV_LEN: usize = STATE_WIDTH - BLOCK_LEN;
 
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
@@ -52,17 +46,17 @@ pub const DIGEST_LEN: usize = 4;
 /// The output portion of the hash state, located in the final chaining-value word.
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
-/// Number of transitions in one BlakeG compression trace block.
+/// Number of transitions in one Eidos compression trace block.
 pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// Standalone BlakeG compression AIR block length.
-pub const HASH_CYCLE_LEN: usize = crate::trace::blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN;
+/// Standalone Eidos compression AIR block length.
+pub const HASH_CYCLE_LEN: usize = crate::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
-/// Index of the last row in a standalone BlakeG compression AIR block (0-based).
+/// Index of the last row in a standalone Eidos compression AIR block (0-based).
 pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
 pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
 

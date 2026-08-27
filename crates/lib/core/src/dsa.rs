@@ -206,7 +206,7 @@ pub mod falcon512_eidos {
         );
 
         for chunk in s2.chunks(8).chain(product.chunks(8)) {
-            cv = Eidos::compress_block(cv, chunk.try_into().expect("chunk length checked above"));
+            cv = Eidos::compress(cv, chunk.try_into().expect("chunk length checked above"));
         }
 
         cv

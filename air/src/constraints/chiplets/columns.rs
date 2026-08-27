@@ -11,7 +11,7 @@ use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
     bitwise::NUM_U32_BYTES,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH},
+    hasher::{DIGEST_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -53,12 +53,12 @@ macro_rules! impl_borrow_for_chiplet_cols {
 ///
 /// The controller uses a row-kind-dependent overlay to fit one compression request in one row:
 ///
-/// - hash rows: `state = block[8] || cv_in[4]`, `row_data = digest_out[4]`;
+/// - hash rows: `state = block[8] || cv_in[4]`, `row_data = cv_out[4]`;
 /// - Merkle rows: `state = block[8] || digest_out[4]`, `row_data = [node_index, node_index_next,
 ///   is_start, 0]`.
 ///
 /// Merkle input CV is the fixed domain-0 two-to-one chaining word, so it does not need trace
-/// columns. Hash rows need both `cv_in` and `digest_out`, so they place the digest in `row_data`.
+/// columns. Hash rows need both `cv_in` and `cv_out`, so they place the output CV in `row_data`.
 ///
 /// ## Layout
 ///
@@ -75,32 +75,13 @@ pub struct ControllerCols<T> {
     pub s1: T,
     /// Hasher-internal row-kind selector.
     pub s2: T,
-    /// BlakeG row payload. See the row-kind overlay documented above.
+    /// Eidos compression row payload. See the row-kind overlay documented above.
     pub state: [T; STATE_WIDTH],
     /// Row-kind-dependent payload. See the row-kind overlay documented above.
     pub row_data: [T; DIGEST_LEN],
 }
 
 impl<T: Copy> ControllerCols<T> {
-    /// Returns the rate portion of the state (state[0..8]).
-    pub fn rate(&self) -> [T; RATE_LEN] {
-        [
-            self.state[0],
-            self.state[1],
-            self.state[2],
-            self.state[3],
-            self.state[4],
-            self.state[5],
-            self.state[6],
-            self.state[7],
-        ]
-    }
-
-    /// Returns the capacity portion of the state (state[8..12]).
-    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
-        [self.state[8], self.state[9], self.state[10], self.state[11]]
-    }
-
     /// Returns the state tail (`state[8..12]`).
     ///
     /// On hash rows this is the input CV. On Merkle rows this is the output digest.
@@ -108,8 +89,10 @@ impl<T: Copy> ControllerCols<T> {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
     }
 
-    /// Returns the hash-row output digest (`row_data[0..4]`).
-    pub fn hash_digest(&self) -> [T; DIGEST_LEN] {
+    /// Returns the hash-row output chaining value (`row_data[0..4]`).
+    ///
+    /// A terminal row of a framed hash interprets this value as the completed digest.
+    pub fn hash_cv(&self) -> [T; DIGEST_LEN] {
         self.row_data
     }
 
@@ -133,13 +116,13 @@ impl<T: Copy> ControllerCols<T> {
         self.row_data[2]
     }
 
-    /// Returns rate0 (state[0..4]).
-    pub fn rate0(&self) -> [T; DIGEST_LEN] {
+    /// Returns the low block word (`state[0..4]`).
+    pub fn block_lo(&self) -> [T; DIGEST_LEN] {
         [self.state[0], self.state[1], self.state[2], self.state[3]]
     }
 
-    /// Returns rate1 (state[4..8]).
-    pub fn rate1(&self) -> [T; DIGEST_LEN] {
+    /// Returns the high block word (`state[4..8]`).
+    pub fn block_hi(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
     }
 }

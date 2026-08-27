@@ -4,7 +4,7 @@
 //! ordering before writing the registry constants, relation wrapper constants, memory layout, and
 //! constraint evaluator. `--check` recomputes the same artifacts and byte-compares them with the
 //! checked-in files. A from-scratch `hash_elements` cross-check over a structured order sample
-//! separately covers the resumed-sponge arithmetic.
+//! separately covers the resumed Eidos compression chain.
 //!
 //! Both modes cover all proof orders; sampling is confined to the independent hash oracle.
 
@@ -249,7 +249,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     let canonical = factory.circuit_for_order(&canonical_order).map_err(|err| err.to_string())?;
     let shape = CircuitShape::of(&canonical)?;
 
-    // From-scratch hash cross-check on the structured sample: the resumed sponge must
+    // From-scratch hash cross-check on the structured sample: the resumed compression chain must
     // reproduce full-stream `hash_elements` digests. This is the hash-fault oracle the
     // per-order dual path below cannot be (both its sides share the resumed states).
     let mut scalar_buffer = ShuffleEncodeBuffer::new();
@@ -265,7 +265,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
             || scalar_leaf != circuit.commitment
         {
             return Err(format!(
-                "resumed-sponge commitments diverge from from-scratch hashing for {order:?}"
+                "resumed-chain commitments diverge from from-scratch hashing for {order:?}"
             ));
         }
     }
@@ -315,7 +315,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
                         },
                         Mode::Check => {
                             // Drift checks still cover every assembled order, but compare exact
-                            // preimages instead of repeating 3.6 million scalar sponge runs.
+                            // preimages instead of repeating 3.6 million scalar compression runs.
                             let assembled = factory
                                 .factored()
                                 .circuit_for_order(&order)

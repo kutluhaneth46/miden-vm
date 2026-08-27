@@ -79,7 +79,8 @@ fn verifier_rejects_forged_overflow_pop_order() {
         (Felt::new_unchecked(2), Felt::new_unchecked(2), Felt::new_unchecked(1)),
     );
 
-    let (mut core_matrix, chiplets_matrix, blakeg_matrix, and8_matrix) = main.to_air_matrices();
+    let (mut core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
+        main.to_air_matrices();
 
     // Redirect the first DROP to consume the older overflow record R1.
     core_row_mut(&mut core_matrix, drop_rows[0]).stack.b1 = first_record_clk;
@@ -142,7 +143,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
         &stark_config,
         core_matrix,
         chiplets_matrix,
-        blakeg_matrix,
+        eidos_compression_matrix,
         and8_matrix,
         &public_values,
         &aux_inputs,

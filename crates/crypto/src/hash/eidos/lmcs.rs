@@ -1,8 +1,8 @@
 //! Eidos LMCS configuration.
 //!
-//! LMCS leaf hashing uses zero padding to the eight-felt rate and deliberately does not bind a
-//! variable input length. Matrix metadata fixes every committed row width, so this construction is
-//! only suitable for those fixed-width rows and is not interchangeable with
+//! LMCS leaf hashing uses zero padding to the eight-Felt block width and deliberately does not bind
+//! a variable input length. Matrix metadata fixes every committed row width, so this construction
+//! is only suitable for those fixed-width rows and is not interchangeable with
 //! [`Eidos::hash_elements`](super::Eidos::hash_elements). Internal nodes use the distinct
 //! eight-felt Eidos chaining value and therefore remain separated from leaves.
 
@@ -11,11 +11,8 @@ use core::array;
 use p3_symmetric::PseudoCompressionFunction;
 
 use super::{
-    framing::{
-        FELT_INIT_DIGEST_U64, compress_packed_u64_block, compress_u64_block, encode_felt_block,
-        encode_packed_felt_block, pack_u32_pair_u64,
-    },
-    primitive::{BlakeG, PACKED_LANES},
+    PACKED_LANES, compression, encoding,
+    framing::{self, FELT_BLOCK_INIT_CV, FELT_INIT_CV_U64},
 };
 use crate::{
     Felt,
@@ -26,7 +23,7 @@ use crate::{
 };
 
 const DIGEST_WIDTH: usize = super::DIGEST_WIDTH;
-const RATE: usize = super::RATE;
+const BLOCK_LEN: usize = super::BLOCK_LEN;
 
 const COMPRESSION_INPUTS: usize = 2;
 
@@ -63,7 +60,7 @@ pub struct EidosLmcsCompressor;
 impl PseudoCompressionFunction<Digest, COMPRESSION_INPUTS> for EidosLmcsCompressor {
     #[inline]
     fn compress(&self, input: [Digest; COMPRESSION_INPUTS]) -> Digest {
-        compress_u64_block([
+        let block = [
             input[0][0],
             input[0][1],
             input[0][2],
@@ -72,14 +69,15 @@ impl PseudoCompressionFunction<Digest, COMPRESSION_INPUTS> for EidosLmcsCompress
             input[1][1],
             input[1][2],
             input[1][3],
-        ])
+        ];
+        encoding::pack_cv_to_u64s(compression::compress_u64_cv(FELT_BLOCK_INIT_CV, block))
     }
 }
 
 impl PseudoCompressionFunction<PackedDigest, COMPRESSION_INPUTS> for EidosLmcsCompressor {
     #[inline]
     fn compress(&self, input: [PackedDigest; COMPRESSION_INPUTS]) -> PackedDigest {
-        compress_packed_u64_block([
+        let block = [
             input[0][0],
             input[0][1],
             input[0][2],
@@ -88,7 +86,8 @@ impl PseudoCompressionFunction<PackedDigest, COMPRESSION_INPUTS> for EidosLmcsCo
             input[1][1],
             input[1][2],
             input[1][3],
-        ])
+        ];
+        compression::compress_packed_u64_cv(framing::init_packed_u64_cv(0, BLOCK_LEN as u32), block)
     }
 }
 
@@ -98,16 +97,18 @@ impl StatefulHasher<Felt, Digest> for EidosLmcsHasher {
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Felt>) {
         ensure_initialized(state);
 
-        let cv =
-            absorb_blocks(unpack_lmcs_cv(&read_digest(state)), input, Felt::ZERO, |cv, block| {
-                BlakeG::compress(cv, encode_felt_block(&block))
-            });
+        let cv = absorb_blocks(
+            encoding::unpack_u64_cv(read_digest(state)),
+            input,
+            Felt::ZERO,
+            |cv, block| compression::compress_cv(cv, encoding::encode_felt_block(&block)),
+        );
         pack_lmcs_cv_into(cv, state);
     }
 
     fn squeeze(&self, state: &Self::State) -> Digest {
         if state[INIT_FLAG_IDX] == 0 {
-            FELT_INIT_DIGEST_U64
+            FELT_INIT_CV_U64
         } else {
             read_digest(state)
         }
@@ -121,10 +122,12 @@ impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
         ensure_packed_initialized(state);
 
         let cv = absorb_blocks(
-            unpack_lmcs_cv_packed(&read_digest(state)),
+            encoding::unpack_packed_u64_cv(read_digest(state)),
             input,
             [Felt::ZERO; PACKED_LANES],
-            |cv, block| BlakeG::compress_packed_native(cv, encode_packed_felt_block(block)),
+            |cv, block| {
+                compression::compress_cv_packed(cv, encoding::encode_packed_felt_block(block))
+            },
         );
         pack_lmcs_cv_packed_into(cv, state);
     }
@@ -134,15 +137,15 @@ impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
         if initialized {
             read_digest(state)
         } else {
-            array::from_fn(|word| [FELT_INIT_DIGEST_U64[word]; PACKED_LANES])
+            array::from_fn(|word| [FELT_INIT_CV_U64[word]; PACKED_LANES])
         }
     }
 }
 
 impl<Input, Target> Alignable<Input, Target> for EidosLmcsHasher {
-    // LMCS rows are absorbed in Eidos rate-sized groups; this is independent of
+    // LMCS rows are absorbed in Eidos block-sized groups; this is independent of
     // the host SIMD lane count.
-    const ALIGNMENT: usize = RATE;
+    const ALIGNMENT: usize = BLOCK_LEN;
 }
 
 /// Creates the Eidos LMCS configuration used by the STARK proof config.
@@ -154,19 +157,19 @@ fn absorb_blocks<T, D>(
     mut digest: D,
     input: impl IntoIterator<Item = T>,
     zero: T,
-    mut compress: impl FnMut(D, [T; RATE]) -> D,
+    mut compress: impl FnMut(D, [T; BLOCK_LEN]) -> D,
 ) -> D
 where
     T: Copy,
 {
-    let mut block = [zero; RATE];
+    let mut block = [zero; BLOCK_LEN];
     let mut filled = 0usize;
 
     for value in input {
         block[filled] = value;
         filled += 1;
 
-        if filled == RATE {
+        if filled == BLOCK_LEN {
             digest = compress(digest, block);
             filled = 0;
         }
@@ -185,7 +188,7 @@ fn ensure_initialized(state: &mut State) {
         return;
     }
 
-    write_digest(state, FELT_INIT_DIGEST_U64);
+    write_digest(state, FELT_INIT_CV_U64);
     state[INIT_FLAG_IDX] = 1;
 }
 
@@ -196,7 +199,7 @@ fn ensure_packed_initialized(state: &mut PackedState) {
         return;
     }
 
-    for (word, value) in state[..DIGEST_WIDTH].iter_mut().zip(FELT_INIT_DIGEST_U64) {
+    for (word, value) in state[..DIGEST_WIDTH].iter_mut().zip(FELT_INIT_CV_U64) {
         *word = [value; PACKED_LANES];
     }
     state[INIT_FLAG_IDX] = [1; PACKED_LANES];
@@ -219,45 +222,12 @@ fn write_digest<T: Copy, const WIDTH: usize>(state: &mut [T; WIDTH], digest: [T;
     state[..DIGEST_WIDTH].copy_from_slice(&digest);
 }
 
-fn unpack_lmcs_cv(digest: &Digest) -> [u32; 8] {
-    let unpack = |value: u64| (value as u32, (value >> 32) as u32);
-    let (a, b) = unpack(digest[0]);
-    let (c, d) = unpack(digest[1]);
-    let (e, f) = unpack(digest[2]);
-    let (g, h) = unpack(digest[3]);
-    [a, b, c, d, e, f, g, h]
-}
-
 fn pack_lmcs_cv_into(cv: [u32; 8], state: &mut State) {
-    state[0] = pack_u32_pair_u64(cv[0], cv[1]);
-    state[1] = pack_u32_pair_u64(cv[2], cv[3]);
-    state[2] = pack_u32_pair_u64(cv[4], cv[5]);
-    state[3] = pack_u32_pair_u64(cv[6], cv[7]);
-}
-
-fn unpack_lmcs_cv_packed(digest: &PackedDigest) -> [[u32; PACKED_LANES]; 8] {
-    let unpack = |value: PackedU64| {
-        (
-            array::from_fn(|lane| value[lane] as u32),
-            array::from_fn(|lane| (value[lane] >> 32) as u32),
-        )
-    };
-    let (a, b) = unpack(digest[0]);
-    let (c, d) = unpack(digest[1]);
-    let (e, f) = unpack(digest[2]);
-    let (g, h) = unpack(digest[3]);
-    [a, b, c, d, e, f, g, h]
+    write_digest(state, encoding::pack_cv_to_u64s(cv));
 }
 
 fn pack_lmcs_cv_packed_into(cv: [[u32; PACKED_LANES]; 8], state: &mut PackedState) {
-    state[0] = pack_lmcs_pair_packed(cv[0], cv[1]);
-    state[1] = pack_lmcs_pair_packed(cv[2], cv[3]);
-    state[2] = pack_lmcs_pair_packed(cv[4], cv[5]);
-    state[3] = pack_lmcs_pair_packed(cv[6], cv[7]);
-}
-
-fn pack_lmcs_pair_packed(lo: [u32; PACKED_LANES], hi: [u32; PACKED_LANES]) -> PackedU64 {
-    array::from_fn(|lane| pack_u32_pair_u64(lo[lane], hi[lane]))
+    write_digest(state, encoding::pack_cv_to_packed_u64s(cv));
 }
 
 #[cfg(test)]
@@ -268,15 +238,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        hash::eidos::{Eidos, framing::compress_felt_digest_block},
+        hash::eidos::{Eidos, compression::compress_felt_block_for_test},
         stark::hasher::{Alignable, StatefulHasher},
     };
 
     const INPUT_LENGTHS: [usize; 7] = [0, 1, 7, 8, 9, 16, 17];
 
     #[test]
-    fn lmcs_alignment_is_rate() {
-        assert_eq!(<EidosLmcsHasher as Alignable<Felt, Digest>>::ALIGNMENT, RATE);
+    fn lmcs_alignment_is_one_eidos_block() {
+        assert_eq!(<EidosLmcsHasher as Alignable<Felt, Digest>>::ALIGNMENT, BLOCK_LEN);
     }
 
     #[test]
@@ -285,14 +255,14 @@ mod tests {
 
         let scalar =
             <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::squeeze(&hasher, &[0; STATE_WIDTH]);
-        assert_eq!(scalar, FELT_INIT_DIGEST_U64);
+        assert_eq!(scalar, FELT_INIT_CV_U64);
 
         let packed = <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::squeeze(
             &hasher,
             &[[0; PACKED_LANES]; STATE_WIDTH],
         );
         for lane in 0..PACKED_LANES {
-            assert_eq!(unpack_digest_lane(packed, lane), FELT_INIT_DIGEST_U64);
+            assert_eq!(unpack_digest_lane(packed, lane), FELT_INIT_CV_U64);
         }
     }
 
@@ -422,7 +392,7 @@ mod tests {
             );
 
             let mut expected = Eidos::init_chaining_word(0, 0).into();
-            expected = absorb_blocks(expected, input, Felt::ZERO, compress_felt_digest_block);
+            expected = absorb_blocks(expected, input, Felt::ZERO, compress_felt_block_for_test);
 
             let actual = read_digest(&state).map(Felt::new_unchecked);
             assert_eq!(
@@ -477,7 +447,7 @@ mod tests {
     }
 
     fn eidos_hash_two_digests(left: Digest, right: Digest) -> Digest {
-        let elements: [Felt; RATE] = array::from_fn(|idx| {
+        let elements: [Felt; BLOCK_LEN] = array::from_fn(|idx| {
             let value = if idx < DIGEST_WIDTH {
                 left[idx]
             } else {

@@ -231,7 +231,7 @@ where
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
-            Operation::BCompress => crypto_ops::op_bcompress(processor, tracer)
+            Operation::Compress => crypto_ops::op_compress(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
             Operation::MpVerify(err_code) => crypto_ops::op_mpverify(processor, *err_code, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,

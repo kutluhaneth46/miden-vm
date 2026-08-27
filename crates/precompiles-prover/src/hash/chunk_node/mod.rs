@@ -178,7 +178,7 @@ where
     let pos_act: LB::Expr = act.clone();
     let pos_act_head: LB::Expr = act * is_head;
 
-    let cap_chunk = Tag::CHUNKS.as_word().map(LB::Expr::from);
+    let chunk_chain_context = Tag::CHUNKS.as_word().map(LB::Expr::from);
 
     let interaction_deg = Deg { v: 1, u: 1 };
     let provides_deg = Deg { v: 1, u: 2 };
@@ -241,7 +241,7 @@ where
         (
             "eidos-chain-input",
             pos_act.clone(),
-            EidosChainInputMsg::chunks(absorption_id.clone(), f, cap_chunk),
+            EidosChainInputMsg::chunks(absorption_id.clone(), f, chunk_chain_context),
             interaction_deg
         ),
     );
@@ -297,8 +297,8 @@ where
         + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
         - LB::Expr::from(Felt::from(128u8));
 
-    let cap_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
-    let cap_keccak = [
+    let digest_chunks_chain_context = Tag::CHUNKS.as_word().map(LB::Expr::from);
+    let keccak_chain_context = [
         LB::Expr::from(Keccak256Precompile::id()),
         LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
         len_bytes.clone(),
@@ -415,7 +415,11 @@ where
         (
             "eidos-chain-input",
             pos_act.clone(),
-            EidosChainInputMsg::chunks(absorption_id_digest_chunks.clone(), d, cap_digest_chunks,),
+            EidosChainInputMsg::chunks(
+                absorption_id_digest_chunks.clone(),
+                d,
+                digest_chunks_chain_context,
+            ),
             interaction_deg
         ),
         (
@@ -438,14 +442,14 @@ where
             pos_act.clone(),
             EidosChainInputMsg::node(
                 absorption_id_keccak.clone(),
-                core::array::from_fn(|idx| {
+                array::from_fn(|idx| {
                     if idx < 4 {
                         h_input_chunks[idx].clone()
                     } else {
                         h_digest_chunks[idx - 4].clone()
                     }
                 }),
-                cap_keccak,
+                keccak_chain_context,
             ),
             interaction_deg
         ),

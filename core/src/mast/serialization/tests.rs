@@ -153,7 +153,7 @@ fn confirm_operation_structure() {
         Operation::MStream => (),
         Operation::Pipe => (),
         Operation::CryptoStream => (),
-        Operation::BCompress => (),
+        Operation::Compress => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),
         Operation::FriE2F4 => (),
@@ -243,7 +243,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::MStream,
         Operation::Pipe,
         Operation::CryptoStream,
-        Operation::BCompress,
+        Operation::Compress,
         Operation::MpVerify(Felt::from_u32(1022)),
         Operation::MrUpdate,
         Operation::FriE2F4,
@@ -329,7 +329,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::MStream
         | Operation::Pipe
         | Operation::CryptoStream
-        | Operation::BCompress
+        | Operation::Compress
         | Operation::MpVerify(_)
         | Operation::MrUpdate
         | Operation::FriE2F4
@@ -1591,7 +1591,7 @@ fn test_header_counts_match_node_kinds() {
     assert_eq!(external_node_count, 1);
 }
 
-/// Version 4 encoded opcode 0x50 as HPERM, while version 5 interprets it as BCOMPRESS. Every load
+/// Version 4 encoded opcode 0x50 as HPERM, while version 5 interprets it as COMPRESS. Every load
 /// path must reject version-4 bytes before it can attach the new semantics to an old stored digest.
 #[test]
 fn test_hperm_wire_version_is_rejected_by_every_load_path() {

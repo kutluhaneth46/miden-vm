@@ -1,8 +1,8 @@
 //! Newtype wrappers for the two semantically distinct `[Felt; 4]`
-//! shapes the deferred transcript's native Eidos/BlakeG chiplet hands around.
+//! shapes the deferred transcript's native Eidos chiplet hands around.
 //!
-//! Without these, [`EidosDigest`] (output of the framed compression chain) and
-//! [`EidosCap`] (chain framing context carrying a domain separator such as a
+//! Without these, [`EidosDigest`] (output of the framed Eidos chain) and
+//! [`EidosChainContext`] (chain framing context carrying a domain separator such as a
 //! VM deferred tag word or a prover-local explicit pin tuple) collapse
 //! to the same primitive type — the compiler can't catch a
 //! digest accidentally fed in as framing context (or vice versa).
@@ -47,43 +47,42 @@ impl From<Digest> for EidosDigest {
     }
 }
 
-/// Semantic framing context for an Eidos chain. The legacy `Cap` name is retained at API call sites
-/// pending a repository-wide terminology migration. VM deferred contexts are raw VM tag words;
-/// prover-local explicit-pin contexts keep their local tuple. Constructors for off-pattern
-/// contexts stay open via the tuple-struct constructor.
+/// Semantic framing context for an Eidos chain. VM deferred contexts are raw VM tag words;
+/// prover-local explicit-pin contexts use their local tuple. The tuple-struct constructor permits
+/// off-pattern contexts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct EidosCap(pub [Felt; 4]);
+pub struct EidosChainContext(pub [Felt; 4]);
 
-impl EidosCap {
+impl EidosChainContext {
     pub fn as_array(&self) -> [Felt; 4] {
         self.0
     }
 
     /// VM `Tag::CHUNKS` (`[2, 0, 0, 0]`) — generic chunk-content
-    /// capacity used by chunk chains and one-chunk Keccak digest commitments.
+    /// chain context used by chunk chains and one-chunk Keccak digest commitments.
     pub fn chunk() -> Self {
         Self(Tag::CHUNKS.as_word())
     }
 
-    /// VM `Tag::AND` (`[1, 0, 0, 0]`) — capacity for the transcript eval
+    /// VM `Tag::AND` (`[1, 0, 0, 0]`) — chain context for the transcript eval
     /// chip's AND-node hash combining two proven-true child hashes.
     pub fn and() -> Self {
         Self(Tag::AND.as_word())
     }
 
     /// VM Keccak-256 assertion tag (`[Keccak256Precompile::id(), 0,
-    /// len_bytes, 0]`) — capacity for the Keccak-node transcript hash.
+    /// len_bytes, 0]`) — chain context for the Keccak-node transcript hash.
     pub fn keccak256_assertion(len_bytes: u32) -> Self {
         Self(Keccak256Precompile::assert_tag(len_bytes).as_word())
     }
 
-    /// VM uint `VALUE` capacity: `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`.
+    /// VM uint `VALUE` context: `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`.
     pub fn uint_value(bound_ptr: u32) -> Self {
         let domain = UintDomain::from_bound_ptr(bound_ptr).expect("known uint bound pointer");
         Self(UintPrecompile::value_tag(domain).as_word())
     }
 
-    /// Explicit uint pin-claim capacity: `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
+    /// Explicit uint pin-claim context: `[UINT_PIN_CLAIM_TAG, bound_ptr, pin_ptr, 0]`.
     pub fn uint_pin_claim(bound_ptr: u32, pin_ptr: u32) -> Self {
         Self([
             Felt::from(UINT_PIN_CLAIM_TAG),
@@ -93,7 +92,7 @@ impl EidosCap {
         ])
     }
 
-    /// VM uint operation capacity: `[UintPrecompile::id(), op_id, 0, 0]`.
+    /// VM uint operation context: `[UintPrecompile::id(), op_id, 0, 0]`.
     pub fn uint_op(op: UintOpId) -> Self {
         let op_id = match op {
             UintOpId::Add => UintPrecompile::ADD_OP_ID,
@@ -104,7 +103,7 @@ impl EidosCap {
         Self(UintPrecompile::op_tag(op_id).as_word())
     }
 
-    /// VM curve `VALUE` capacity: `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
+    /// VM curve `VALUE` context: `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
     /// The group pointer selects the fixed curve; its coefficient and bound
     /// metadata are pinned by the EC group table.
     pub fn ec_create(group_ptr: u32) -> Self {
@@ -116,9 +115,9 @@ impl EidosCap {
         ])
     }
 
-    /// VM curve operation capacity: `[CurvePrecompile::id(), op_id, 0, 0]`
+    /// VM curve operation context: `[CurvePrecompile::id(), op_id, 0, 0]`
     /// for group add / sub / eq nodes over two child point hashes. The curve
-    /// threads from the operands' VALUE caps.
+    /// threads from the operands' VALUE contexts.
     pub fn ec_op(op: EcOpId) -> Self {
         let op_id = match op {
             EcOpId::Add => CurvePrecompile::ADD_OP_ID,
@@ -130,9 +129,9 @@ impl EidosCap {
 
     /// VM curve MSM framing context: `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`.
     ///
-    /// The legacy `iv` suffix is retained for compatibility. Eidos binds this context in the
-    /// chain's terminal framing block; it is not a live chaining value fed into the first step.
-    pub fn ec_msm_iv() -> Self {
+    /// Eidos binds this context in the chain's terminal framing block; it is not a live chaining
+    /// value fed into the first step.
+    pub fn ec_msm_context() -> Self {
         Self([
             CurvePrecompile::id(),
             Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),

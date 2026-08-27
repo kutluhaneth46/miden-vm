@@ -15,12 +15,12 @@ const OOD_ROW_FELTS: usize = 1_840;
 const ALPHA_PTR: u32 = 1_000;
 const RESULT_PTR: u32 = 2_000;
 
-const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+const INITIAL_EIDOS_STATE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 const ALPHA: [u64; 2] = [3, 5];
 const INITIAL_ACC: [u64; 2] = [7, 9];
 
 fn source() -> String {
-    let s = INITIAL_SPONGE;
+    let s = INITIAL_EIDOS_STATE;
     let ood_ptr = pvm_layout_const("PREPROCESSED_CURRENT_PTR");
     format!(
         r#"
@@ -115,13 +115,13 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
     assert_eq!(read_memory_felt(&output, RESULT_PTR + 14), expected_acc[0]);
     assert_eq!(read_memory_felt(&output, RESULT_PTR + 15), expected_acc[1]);
 
-    let initial_cv_limbs: [u64; 4] = INITIAL_SPONGE[8..].try_into().expect("four-felt CV");
+    let initial_cv_limbs: [u64; 4] = INITIAL_EIDOS_STATE[8..].try_into().expect("four-felt CV");
     let initial_cv = Word::new(initial_cv_limbs.map(Felt::new_unchecked));
     let expected_cv = row
         .as_chunks::<8>()
         .0
         .iter()
-        .fold(initial_cv, |cv, block| Eidos::compress_block(cv, *block));
+        .fold(initial_cv, |cv, block| Eidos::compress(cv, *block));
     for (i, expected) in expected_cv.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, RESULT_PTR + 8 + i as u32),

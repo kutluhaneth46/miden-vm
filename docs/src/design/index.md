@@ -33,25 +33,25 @@ Miden VM consists of several interconnected components, each providing a specifi
 * **Program decoder**, which is responsible for computing a commitment to the executing program and converting the program into a sequence of operations executed by the VM.
 * **Operand stack**, which is a push-down stack which provides operands for all operations executed by the VM.
 * **Chiplets**, which is a set of specialized circuits used to accelerate commonly-used complex computations. Currently, the VM relies on 5 chiplets:
-  - Hash controller, used with the standalone BlakeG compression AIR to compute Eidos sequential,
+  - Hash controller, used with the standalone Eidos compression AIR to compute Eidos sequential,
     control-block, and Merkle hashes.
   - Bitwise chiplet, used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
   - Memory chiplet, used to support random-access memory in the VM.
   - ACE chiplet, used to evaluate arithmetic circuits.
   - Kernel ROM chiplet, used to enable calling predefined kernel procedures which are provided before execution begins.
-* **BlakeG compression AIR**, which proves every 32-row compression requested by the hash
+* **Eidos compression AIR**, which proves every 32-row compression requested by the hash
   controller.
-* **And8 lookup AIR**, whose fixed byte-pair table supplies byte-AND, BlakeG rotation, and
+* **And8 lookup AIR**, whose fixed byte-pair table supplies byte-AND, Eidos compression rotation, and
   [16-bit range-check](./range.md) relations.
 
 The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
 
 ## VM execution trace
 
-Miden VM is a four-AIR statement: Core, Chiplets, BlakeG compression, and And8 lookup. The
+Miden VM is a four-AIR statement: Core, Chiplets, Eidos compression, and And8 lookup. The
 traditional combined row view of the Core and Chiplets matrices consists of $73$ main columns;
-the compatibility layout reserves $9$ auxiliary LogUp columns. BlakeG uses its own 108-column
-main matrix and $20$ auxiliary LogUp columns in each 32-row cycle, while And8 uses a fixed
+the compatibility layout reserves $9$ auxiliary LogUp columns. Eidos compression uses its own
+108-column main matrix and $20$ auxiliary LogUp columns in each 32-row cycle, while And8 uses a fixed
 65,536-row byte-pair table and dynamic multiplicity columns.
 
 The system, decoder, and stack use dedicated columns, while all chiplets share the same $24$

@@ -2,22 +2,22 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use miden_air::trace::{
     and8_lookup::{
-        BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_BLAKEG_ROT7,
-        BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
-    },
-    blakeg_compression::{
-        BLAKEG_COMPRESSION_CYCLE_LEN, BlakeGByteLookup, ByteLookupRecorder,
-        NUM_BLAKEG_COMPRESSION_COLS, TraceMode as BlakeGCompressionTraceMode,
-        retag_felt_trace_block_cycle_id,
-        write_felt_trace_block_into_zeroed_with_lookups as write_blakeg_felt_trace_block,
+        BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7,
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
     },
     chiplets::hasher::{
-        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
-        MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, STATE_WIDTH, Selectors,
+        BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
+        MR_UPDATE_NEW, MR_UPDATE_OLD, STATE_WIDTH, Selectors,
+    },
+    eidos_compression::{
+        ByteLookupRecorder, EIDOS_COMPRESSION_CYCLE_LEN, EidosCompressionByteLookup,
+        NUM_EIDOS_COMPRESSION_COLS, TraceMode as EidosCompressionTraceMode,
+        retag_felt_trace_block_cycle_id,
+        write_felt_trace_block_into_zeroed_with_lookups as write_eidos_compression_felt_trace_block,
     },
 };
 use miden_core::{
-    chiplets::{blakeg, hasher::compress_state},
+    chiplets::{eidos_compression, hasher::compress_state},
     utils::RowMajorMatrix,
 };
 use rayon::prelude::*;
@@ -43,19 +43,19 @@ mod tests;
 /// Key type for digest-based lookups.
 type DigestKey = [u64; 4];
 
-/// Key type for BlakeG compression input states.
+/// Key type for Eidos compression input states.
 type StateKey = [u64; STATE_WIDTH];
 
-/// Output shape requested from one BlakeG compression block.
+/// Output shape requested from one Eidos compression block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CompressionOutput {
-    /// Packed digest output used by the VM hash operations.
+    /// Packed chaining-value output used by the VM hash operations.
     Packed,
     /// Direct 16-lane XOF output used by AEAD stream rows.
     AeadXof { clk: Felt },
 }
 
-/// Deduplication key for standalone BlakeG compression blocks.
+/// Deduplication key for standalone Eidos compression blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct CompressionRequestKey {
     state: StateKey,
@@ -82,8 +82,8 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///
 /// The controller records one row per compression request. Hash rows carry
 /// `block[8] || cv_in[4]` in the state columns and `cv_out[4]` in row data; Merkle rows carry
-/// `block[8] || cv_out[4]` plus their path-index data. The standalone BlakeG compression AIR
-/// executes one block per unique input state, with multiplicity tracked by the
+/// `block[8] || cv_out[4]` plus their path-index data. The standalone Eidos compression
+/// AIR executes one block per unique input state, with multiplicity tracked by the
 /// compression-link bus.
 #[derive(Debug, Default)]
 pub struct Hasher {
@@ -94,7 +94,7 @@ pub struct Hasher {
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps (input state, output shape) -> multiplicity for compression deduplication.
-    /// During trace generation, one standalone BlakeG block is emitted per entry.
+    /// During trace generation, one standalone Eidos compression block is emitted per entry.
     compression_request_map: BTreeMap<CompressionRequestKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
@@ -122,40 +122,40 @@ impl Hasher {
     /// Returns the layout of the hasher region as `(controller_len, compression_len)`.
     ///
     /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
-    /// align the following chiplet section. `compression_len` is the standalone BlakeG AIR length,
-    /// before power-of-two trace padding.
+    /// align the following chiplet section. `compression_len` is the standalone Eidos compression
+    /// AIR length, before power-of-two trace padding.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
         let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
-        let compression_len = self.blakeg_compression_trace_len();
+        let compression_len = self.eidos_compression_trace_len();
         (controller_len, compression_len)
     }
 
-    /// Returns the unpadded BlakeG-compression AIR trace length.
+    /// Returns the unpadded Eidos compression AIR trace length.
     ///
     /// Wrapped lookup accumulation lets real compression blocks occupy the full logical trace.
     /// Power-of-two padding may still add zero-multiplicity dummy blocks later.
-    pub(crate) fn blakeg_compression_trace_len(&self) -> usize {
+    pub(crate) fn eidos_compression_trace_len(&self) -> usize {
         if self.finalized {
             0
         } else {
-            self.compression_request_map.len() * BLAKEG_COMPRESSION_CYCLE_LEN
+            self.compression_request_map.len() * EIDOS_COMPRESSION_CYCLE_LEN
         }
     }
 
-    /// Adds range-check requests emitted by the standalone BlakeG compression AIR.
-    pub(super) fn append_blakeg_range_checks(
+    /// Adds range-check requests emitted by the standalone Eidos compression AIR.
+    pub(super) fn append_eidos_compression_range_checks(
         &self,
-        blakeg_height: usize,
+        eidos_compression_height: usize,
         range: &mut RangeChecker,
     ) {
-        debug_assert_eq!(blakeg_height % BLAKEG_COMPRESSION_CYCLE_LEN, 0);
+        debug_assert_eq!(eidos_compression_height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
         debug_assert!(!self.finalized, "range checks must be collected before finalization");
 
-        let block_count = blakeg_height / BLAKEG_COMPRESSION_CYCLE_LEN;
+        let block_count = eidos_compression_height / EIDOS_COMPRESSION_CYCLE_LEN;
         debug_assert!(
             block_count >= self.compression_request_map.len(),
-            "BlakeG height is too short for recorded compression requests",
+            "EidosCompression height is too short for recorded compression requests",
         );
 
         for key in self.compression_request_map.keys() {
@@ -180,8 +180,8 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Applies one packed BlakeG compression.
-    pub fn bcompress(&mut self, state: HasherState) -> (Felt, HasherState) {
+    /// Applies one packed Eidos compression.
+    pub fn compress(&mut self, state: HasherState) -> (Felt, HasherState) {
         let addr = self.trace.next_row_addr();
 
         let compressed = self.append_hash_compression(LINEAR_HASH, state, true);
@@ -189,7 +189,7 @@ impl Hasher {
         (addr, compressed)
     }
 
-    /// Applies one BlakeG compression and returns all 16 raw output lanes.
+    /// Applies one Eidos compression and returns all 16 raw output lanes.
     pub fn compress_aead_xof(
         &mut self,
         _ctx: ContextId,
@@ -200,7 +200,7 @@ impl Hasher {
             &state,
             CompressionOutput::AeadXof { clk: Felt::from(clk) },
         );
-        blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32)
+        eidos_compression::compress_raw_xof_lanes(&state).map(Felt::from_u32)
     }
 
     /// Computes hash(h1, h2) for a control block and returns the result.
@@ -313,14 +313,14 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Finalizes and fills the controller and BlakeG-compression traces.
+    /// Finalizes and fills the controller and Eidos compression traces.
     ///
-    /// Finalization pads the controller region and materializes one BlakeG block
+    /// Finalization pads the controller region and materializes one Eidos compression block
     /// per unique input state. Trace-height padding may append zero-multiplicity dummy blocks.
     pub(super) fn fill_trace(
         mut self,
         trace: &mut ChipletTraceFragment,
-        blakeg_trace: &mut [Felt],
+        eidos_compression_trace: &mut [Felt],
     ) -> Vec<u64> {
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
@@ -335,7 +335,7 @@ impl Hasher {
         }
         let compression_requests = core::mem::take(&mut self.compression_request_map);
         self.trace.fill_trace(trace);
-        fill_blakeg_compression_trace(compression_requests, blakeg_trace)
+        fill_eidos_compression_trace(compression_requests, eidos_compression_trace)
     }
 
     /// Finalizes the controller trace by padding it to the chiplet alignment boundary.
@@ -352,7 +352,7 @@ impl Hasher {
     // CORE HELPER: CONTROLLER COMPRESSION
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a hash-controller compression row and records the BlakeG request.
+    /// Appends a hash-controller compression row and records the Eidos compression request.
     fn append_hash_compression(
         &mut self,
         selectors: Selectors,
@@ -372,7 +372,7 @@ impl Hasher {
         compressed
     }
 
-    /// Appends a Merkle-controller compression row and records the BlakeG request.
+    /// Appends a Merkle-controller compression row and records the Eidos compression request.
     fn append_merkle_compression(
         &mut self,
         selectors: Selectors,
@@ -444,7 +444,7 @@ impl Hasher {
     // COMPRESSION DEDUPLICATION
     // --------------------------------------------------------------------------------------------
 
-    /// Records a BlakeG request keyed by input state and output shape.
+    /// Records an Eidos compression request keyed by input state and output shape.
     fn record_compression_request(&mut self, state: &HasherState, output: CompressionOutput) {
         let key = CompressionRequestKey { state: state_to_key(state), output };
         *self.compression_request_map.entry(key).or_insert(0) += 1;
@@ -488,43 +488,43 @@ impl Hasher {
     }
 }
 
-fn fill_blakeg_compression_trace(
+fn fill_eidos_compression_trace(
     compression_requests: BTreeMap<CompressionRequestKey, u64>,
     trace: &mut [Felt],
 ) -> Vec<u64> {
-    const W: usize = NUM_BLAKEG_COMPRESSION_COLS;
+    const W: usize = NUM_EIDOS_COMPRESSION_COLS;
     const BLOCKS_PER_FILL_CHUNK: usize = 512;
-    debug_assert_eq!(trace.len() % W, 0, "BlakeG trace buffer is not row-aligned");
+    debug_assert_eq!(trace.len() % W, 0, "Eidos compression trace buffer is not row-aligned");
 
     let (rows, _) = trace.as_chunks_mut::<W>();
     debug_assert_eq!(
-        rows.len() % BLAKEG_COMPRESSION_CYCLE_LEN,
+        rows.len() % EIDOS_COMPRESSION_CYCLE_LEN,
         0,
-        "BlakeG height must align to blocks"
+        "EidosCompression height must align to blocks"
     );
     debug_assert!(
-        compression_requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN <= rows.len(),
-        "BlakeG trace buffer is too short for compression requests",
+        compression_requests.len() * EIDOS_COMPRESSION_CYCLE_LEN <= rows.len(),
+        "Eidos compression trace buffer is too short for compression requests",
     );
 
     let request_count = compression_requests.len();
     let requests: Vec<_> = compression_requests.into_iter().collect();
-    let real_rows_len = requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN;
+    let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
     let mut counts = real_rows
-        .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
         .enumerate()
         .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
             let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
             for (block_idx, (block_rows, (key, multiplicity))) in rows_chunk
-                .chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN)
+                .chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN)
                 .zip(requests_chunk.iter())
                 .enumerate()
             {
                 let compression_cycle_id = (chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx) as u64;
-                write_blakeg_compression_block(
+                write_eidos_compression_block(
                     block_rows,
                     &key.state,
                     compression_cycle_id,
@@ -545,9 +545,9 @@ fn fill_blakeg_compression_trace(
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
-        let mut dummy_block = vec![[ZERO; W]; BLAKEG_COMPRESSION_CYCLE_LEN];
+        let mut dummy_block = vec![[ZERO; W]; EIDOS_COMPRESSION_CYCLE_LEN];
         let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-        write_blakeg_compression_block(
+        write_eidos_compression_block(
             &mut dummy_block,
             &zero_state,
             0,
@@ -556,17 +556,17 @@ fn fill_blakeg_compression_trace(
             &mut dummy_counts,
         );
 
-        let dummy_blocks = dummy_rows.len() / BLAKEG_COMPRESSION_CYCLE_LEN;
+        let dummy_blocks = dummy_rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
         for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
             *count += dummy_count * dummy_blocks as u64;
         }
 
         dummy_rows
-            .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
             .enumerate()
             .for_each(|(chunk_idx, chunk)| {
                 for (block_idx, block_rows) in
-                    chunk.chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN).enumerate()
+                    chunk.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
                 {
                     block_rows.copy_from_slice(&dummy_block);
                     let compression_cycle_id =
@@ -579,45 +579,46 @@ fn fill_blakeg_compression_trace(
     counts
 }
 
-/// Fills a BlakeG trace without interning or reordering the requested compression cycles.
+/// Fills an Eidos compression trace without interning or reordering the requested compression
+/// cycles.
 ///
 /// The PVM transcript assigns a logical absorption ID to every compression, so two identical input
 /// states at different absorption positions must remain two physical 32-row cycles. This writer
 /// retains input order while keeping the per-block trace construction parallel.
-fn fill_ordered_blakeg_compression_trace(requests: &[StateKey], trace: &mut [Felt]) -> Vec<u64> {
-    const W: usize = NUM_BLAKEG_COMPRESSION_COLS;
+fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt]) -> Vec<u64> {
+    const W: usize = NUM_EIDOS_COMPRESSION_COLS;
     const BLOCKS_PER_FILL_CHUNK: usize = 512;
-    debug_assert_eq!(trace.len() % W, 0, "BlakeG trace buffer is not row-aligned");
+    debug_assert_eq!(trace.len() % W, 0, "Eidos compression trace buffer is not row-aligned");
 
     let (rows, _) = trace.as_chunks_mut::<W>();
     debug_assert_eq!(
-        rows.len() % BLAKEG_COMPRESSION_CYCLE_LEN,
+        rows.len() % EIDOS_COMPRESSION_CYCLE_LEN,
         0,
-        "BlakeG height must align to blocks"
+        "EidosCompression height must align to blocks"
     );
     debug_assert!(
-        requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN <= rows.len(),
-        "BlakeG trace buffer is too short for ordered compression requests",
+        requests.len() * EIDOS_COMPRESSION_CYCLE_LEN <= rows.len(),
+        "Eidos compression trace buffer is too short for ordered compression requests",
     );
 
-    let real_rows_len = requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN;
+    let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
     let mut counts = real_rows
-        .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
         .enumerate()
         .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
             let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
             for (block_idx, (block_rows, state)) in rows_chunk
-                .chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN)
+                .chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN)
                 .zip(requests_chunk)
                 .enumerate()
             {
                 // The PVM supplies its own input/output interface on this same trace, so the
                 // Miden-controller compression-link multiplicity is deliberately zero.
                 let compression_cycle_id = (chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx) as u64;
-                write_blakeg_compression_block(
+                write_eidos_compression_block(
                     block_rows,
                     state,
                     compression_cycle_id,
@@ -638,9 +639,9 @@ fn fill_ordered_blakeg_compression_trace(requests: &[StateKey], trace: &mut [Fel
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
-        let mut dummy_block = vec![[ZERO; W]; BLAKEG_COMPRESSION_CYCLE_LEN];
+        let mut dummy_block = vec![[ZERO; W]; EIDOS_COMPRESSION_CYCLE_LEN];
         let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-        write_blakeg_compression_block(
+        write_eidos_compression_block(
             &mut dummy_block,
             &zero_state,
             0,
@@ -649,16 +650,16 @@ fn fill_ordered_blakeg_compression_trace(requests: &[StateKey], trace: &mut [Fel
             &mut dummy_counts,
         );
 
-        let dummy_blocks = dummy_rows.len() / BLAKEG_COMPRESSION_CYCLE_LEN;
+        let dummy_blocks = dummy_rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
         for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
             *count += dummy_count * dummy_blocks as u64;
         }
         dummy_rows
-            .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
             .enumerate()
             .for_each(|(chunk_idx, chunk)| {
                 for (block_idx, block_rows) in
-                    chunk.chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN).enumerate()
+                    chunk.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
                 {
                     block_rows.copy_from_slice(&dummy_block);
                     let compression_cycle_id =
@@ -671,15 +672,16 @@ fn fill_ordered_blakeg_compression_trace(requests: &[StateKey], trace: &mut [Fel
     counts
 }
 
-/// Builds the standalone BlakeG-compression and byte-lookup traces for an external collection of
-/// packed Eidos compression requests.
+/// Builds the standalone Eidos compression and byte-lookup traces for an external
+/// collection of packed Eidos compression requests.
 ///
 /// Each request is `[block(8), cv_in(4)]` plus its compression-link multiplicity. Identical input
-/// states are interned exactly as they are in the VM hasher, so the returned BlakeG trace contains
-/// one `BLAKEG_COMPRESSION_CYCLE_LEN`-row block per distinct state and the interface row carries
-/// the summed multiplicity. The companion byte-lookup trace includes both BlakeG's byte-operation
-/// demand and the message-row range checks required by the standalone compression AIR.
-pub fn build_external_blakeg_traces(
+/// states are interned exactly as they are in the VM hasher, so the returned Eidos compression
+/// trace contains one `EIDOS_COMPRESSION_CYCLE_LEN`-row block per distinct state and the interface
+/// row carries the summed multiplicity. The companion byte-lookup trace includes both
+/// Eidos compression's byte-operation demand and the message-row range checks required by the
+/// standalone compression AIR.
+pub fn build_external_eidos_compression_traces(
     requests: impl IntoIterator<Item = ([Felt; STATE_WIDTH], u64)>,
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let mut compression_requests = BTreeMap::new();
@@ -695,10 +697,10 @@ pub fn build_external_blakeg_traces(
     }
 
     let real_blocks = compression_requests.len();
-    let height = (real_blocks * BLAKEG_COMPRESSION_CYCLE_LEN)
+    let height = (real_blocks * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
-        .max(BLAKEG_COMPRESSION_CYCLE_LEN);
-    let block_count = height / BLAKEG_COMPRESSION_CYCLE_LEN;
+        .max(EIDOS_COMPRESSION_CYCLE_LEN);
+    let block_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
 
     let mut range = RangeChecker::new();
     for key in compression_requests.keys() {
@@ -706,30 +708,32 @@ pub fn build_external_blakeg_traces(
     }
     append_zero_message_row_range_checks(block_count - real_blocks, &mut range);
 
-    let mut blakeg = vec![ZERO; height * NUM_BLAKEG_COMPRESSION_COLS];
-    let mut byte_counts = fill_blakeg_compression_trace(compression_requests, &mut blakeg);
+    let mut eidos_compression = vec![ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
+    let mut byte_counts =
+        fill_eidos_compression_trace(compression_requests, &mut eidos_compression);
     range.write_range_counts(&mut byte_counts);
     let and8 = build_and8_lookup_trace(&byte_counts);
 
     (
-        RowMajorMatrix::new(blakeg, NUM_BLAKEG_COMPRESSION_COLS),
+        RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
         RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
     )
 }
 
-/// Builds ordered BlakeG-compression and byte-lookup traces for an external PVM transcript.
+/// Builds ordered Eidos compression and byte-lookup traces for an external PVM
+/// transcript.
 ///
-/// Unlike [`build_external_blakeg_traces`], this function deliberately performs no state
+/// Unlike [`build_external_eidos_compression_traces`], this function deliberately performs no state
 /// interning: the output contains one 32-row cycle for every input state, in iterator order.
-pub fn build_ordered_external_blakeg_traces(
+pub fn build_ordered_external_eidos_compression_traces(
     requests: impl IntoIterator<Item = [Felt; STATE_WIDTH]>,
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let requests: Vec<StateKey> = requests.into_iter().map(|state| state_to_key(&state)).collect();
     let real_blocks = requests.len();
-    let height = (real_blocks * BLAKEG_COMPRESSION_CYCLE_LEN)
+    let height = (real_blocks * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
-        .max(BLAKEG_COMPRESSION_CYCLE_LEN);
-    let block_count = height / BLAKEG_COMPRESSION_CYCLE_LEN;
+        .max(EIDOS_COMPRESSION_CYCLE_LEN);
+    let block_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
 
     let mut range = RangeChecker::new();
     for state in &requests {
@@ -737,19 +741,19 @@ pub fn build_ordered_external_blakeg_traces(
     }
     append_zero_message_row_range_checks(block_count - real_blocks, &mut range);
 
-    let mut blakeg = vec![ZERO; height * NUM_BLAKEG_COMPRESSION_COLS];
-    let mut byte_counts = fill_ordered_blakeg_compression_trace(&requests, &mut blakeg);
+    let mut eidos_compression = vec![ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
+    let mut byte_counts = fill_ordered_eidos_compression_trace(&requests, &mut eidos_compression);
     range.write_range_counts(&mut byte_counts);
     let and8 = build_and8_lookup_trace(&byte_counts);
 
     (
-        RowMajorMatrix::new(blakeg, NUM_BLAKEG_COMPRESSION_COLS),
+        RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
         RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
     )
 }
 
 fn append_message_row_range_checks(state: &HasherState, range: &mut RangeChecker) {
-    for felt in &state[..RATE_LEN] {
+    for felt in &state[..BLOCK_LEN] {
         let value = felt.as_canonical_u64();
         let lo = (value & 0xffff_ffff) as u32;
         let hi = (value >> 32) as u32;
@@ -766,18 +770,18 @@ fn append_zero_message_row_range_checks(block_count: usize, range: &mut RangeChe
         return;
     }
 
-    range.add_value_repeated(0, RATE_LEN * 4 * block_count);
+    range.add_value_repeated(0, BLOCK_LEN * 4 * block_count);
 }
 
 fn num_basic_block_hash_groups(op_batches: &[OpBatch]) -> usize {
     let Some((last, prefix)) = op_batches.split_last() else {
         return 0;
     };
-    prefix.len() * RATE_LEN + last.num_groups().next_power_of_two()
+    prefix.len() * BLOCK_LEN + last.num_groups().next_power_of_two()
 }
 
-fn write_blakeg_compression_block(
-    rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
+fn write_eidos_compression_block(
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
     input_state: &StateKey,
     compression_cycle_id: u64,
     output_mode: CompressionOutput,
@@ -788,19 +792,26 @@ fn write_blakeg_compression_block(
     let h = unpack_cv_from_state_key(input_state);
     let trace_mode = match output_mode {
         CompressionOutput::Packed => {
-            BlakeGCompressionTraceMode::CompressionWithMultiplicity { multiplicity }
+            EidosCompressionTraceMode::CompressionWithMultiplicity { multiplicity }
         },
         CompressionOutput::AeadXof { clk } => {
             assert_eq!(multiplicity, 1, "AEAD XOF requests must not be deduplicated by clk");
-            BlakeGCompressionTraceMode::AeadXof { clk: clk.as_canonical_u64() }
+            EidosCompressionTraceMode::AeadXof { clk: clk.as_canonical_u64() }
         },
     };
 
-    let mut recorder = BlakeGLookupCounter { counts: and8_counts };
-    write_blakeg_felt_trace_block(rows, block, h, compression_cycle_id, trace_mode, &mut recorder);
+    let mut recorder = EidosCompressionLookupCounter { counts: and8_counts };
+    write_eidos_compression_felt_trace_block(
+        rows,
+        block,
+        h,
+        compression_cycle_id,
+        trace_mode,
+        &mut recorder,
+    );
 }
 
-fn unpack_block_from_state_key(state: &StateKey) -> [u32; RATE_LEN * 2] {
+fn unpack_block_from_state_key(state: &StateKey) -> [u32; BLOCK_LEN * 2] {
     core::array::from_fn(|idx| {
         let packed = state[idx / 2];
         if idx.is_multiple_of(2) {
@@ -811,9 +822,9 @@ fn unpack_block_from_state_key(state: &StateKey) -> [u32; RATE_LEN * 2] {
     })
 }
 
-fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - RATE_LEN) * 2] {
+fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - BLOCK_LEN) * 2] {
     core::array::from_fn(|idx| {
-        let packed = state[RATE_LEN + idx / 2];
+        let packed = state[BLOCK_LEN + idx / 2];
         if idx.is_multiple_of(2) {
             (packed & 0xffff_ffff) as u32
         } else {
@@ -822,16 +833,20 @@ fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - RATE_LEN) 
     })
 }
 
-struct BlakeGLookupCounter<'a> {
+struct EidosCompressionLookupCounter<'a> {
     counts: &'a mut [u64],
 }
 
-impl ByteLookupRecorder for BlakeGLookupCounter<'_> {
-    fn record(&mut self, lookup: BlakeGByteLookup, lhs: u8, rhs: u8, result: u32) {
+impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
+    fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
         let kind = match lookup {
-            BlakeGByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            BlakeGByteLookup::Rot12 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT12[byte],
-            BlakeGByteLookup::Rot7 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT7[byte],
+            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
+            EidosCompressionByteLookup::Rot12 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
+            },
+            EidosCompressionByteLookup::Rot7 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
+            },
         };
         count_byte_lookup(self.counts, kind, lhs, rhs, result);
     }
@@ -889,15 +904,15 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 // HASHER STATE MUTATORS
 // ================================================================================================
 
-/// Initializes the first BlakeG compression state for sequential hashing.
+/// Initializes the first Eidos compression state for sequential hashing.
 ///
 /// `n` is the total number of felts in the hash call.
 #[inline(always)]
-pub fn init_state(init_values: &[Felt; RATE_LEN], n: u32) -> [Felt; STATE_WIDTH] {
-    let cv = blakeg::init_chaining_word(0, n);
+pub fn init_state(init_values: &[Felt; BLOCK_LEN], n: u32) -> [Felt; STATE_WIDTH] {
+    let cv = eidos_compression::init_chaining_word(0, n);
     let mut state = [ZERO; STATE_WIDTH];
-    state[..RATE_LEN].copy_from_slice(init_values);
-    state[RATE_LEN..STATE_WIDTH].copy_from_slice(cv.as_slice());
+    state[..BLOCK_LEN].copy_from_slice(init_values);
+    state[BLOCK_LEN..STATE_WIDTH].copy_from_slice(cv.as_slice());
     state
 }
 
@@ -916,16 +931,16 @@ pub fn init_state_from_words_with_domain(
 ) -> [Felt; STATE_WIDTH] {
     let domain_u32 =
         u32::try_from(domain.as_canonical_u64()).expect("hasher domain must fit in u32");
-    let cv = blakeg::two_to_one_chaining_word(domain_u32);
+    let cv = eidos_compression::two_to_one_chaining_word(domain_u32);
     [
         w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], cv[0], cv[1], cv[2], cv[3],
     ]
 }
 
-/// Absorbs values into the rate portion of the state.
+/// Places the next block into the compression state.
 #[inline(always)]
-pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; RATE_LEN]) {
-    state[..RATE_LEN].copy_from_slice(values);
+pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; BLOCK_LEN]) {
+    state[..BLOCK_LEN].copy_from_slice(values);
 }
 
 /// Returns the digest portion of the hasher state.

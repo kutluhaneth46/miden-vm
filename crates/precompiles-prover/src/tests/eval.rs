@@ -112,7 +112,7 @@ fn corruption_act_sticky_down() {
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn corruption_pinned_leaf_cap_slot_mismatch() {
+fn corruption_pinned_leaf_chain_context_slot_mismatch() {
     let mut rng = StdRng::seed_from_u64(0xf0_f6_3d);
     let mut eidos = EidosRequires::new();
     let mut req = TranscriptEvalRequires::new();

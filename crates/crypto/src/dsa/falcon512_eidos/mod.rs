@@ -129,8 +129,9 @@ impl Nonce {
     /// This is used in deterministic signing following [1] and is composed of two parts:
     ///
     /// 1. a byte serving as a version byte,
-    /// 2. a pre-versioned fixed nonce which is the UTF8 encoding of the domain separator
-    ///    "FALCON-BLAKEG-DET" padded with enough zeros to make it of size 39 bytes.
+    /// 2. a pre-versioned fixed nonce which is the UTF8 encoding of the protocol-defined domain
+    ///    separator "FALCON-BLAKEG-DET" padded with enough zeros to make it 39 bytes. The separator
+    ///    contributes to deterministic signature outputs and must remain stable.
     ///
     /// The usefulness of the notion of versioned fixed nonce is discussed in Section 2.1 in [1].
     ///
