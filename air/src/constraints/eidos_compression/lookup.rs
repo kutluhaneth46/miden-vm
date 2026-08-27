@@ -179,18 +179,8 @@ const FOOTER_TOP_BIT_AND8_LOOKUPS: usize = 1;
 const FOOTER_AND8_LOOKUPS: usize =
     FOOTER_HIGH_AND8_LOOKUPS + FOOTER_LOW_AND8_LOOKUPS + FOOTER_TOP_BIT_AND8_LOOKUPS;
 
-const BATCH2_DEG: Deg = Deg { v: 2, u: 2 };
 const FOOTER_INPUT_DEG: Deg = Deg { v: 3, u: 2 };
 const FOOTER_OUTPUT_BATCH2_DEG: Deg = Deg { v: 3, u: 2 };
-fn selected_column_deg(aux_col: usize) -> Deg {
-    match aux_col {
-        0..NARROW_BATCH_COLUMNS => BATCH2_DEG,
-        FOOTER_INPUT_COLUMN => FOOTER_INPUT_DEG,
-        FOOTER_OUTPUT_COLUMN => FOOTER_OUTPUT_BATCH2_DEG,
-        _ => unreachable!("32-row EidosCompression lookup aux column out of range"),
-    }
-}
-
 #[cfg(test)]
 #[derive(Copy, Clone, Debug, Default)]
 pub struct EidosCompressionLookupAir;
@@ -243,141 +233,136 @@ pub(crate) fn emit_lookup_columns<LB>(
     LB: EidosCompressionLookupBuilder,
 {
     for aux_col in 0..EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len() {
-        let column_deg = selected_column_deg(aux_col);
+        let column_deg = match aux_col {
+            0..NARROW_BATCH_COLUMNS => Deg { v: 2, u: 2 },
+            FOOTER_INPUT_COLUMN => FOOTER_INPUT_DEG,
+            FOOTER_OUTPUT_COLUMN => FOOTER_OUTPUT_BATCH2_DEG,
+            _ => unreachable!("32-row EidosCompression lookup aux column out of range"),
+        };
         builder.next_column(
             |col| {
                 col.group(
                     "eidos_compression",
-                    |group| emit_lookup_column::<LB, _>(group, local, next, selectors, aux_col),
+                    |group| match aux_col {
+                        0..NARROW_BATCH_COLUMNS => {
+                            // Narrow columns pair adjacent slots under their row-specific
+                            // multiplicities.
+                            let slot0 = 2 * aux_col;
+                            let slot1 = slot0 + 1;
+                            let slot0_multiplicity =
+                                narrow_slot_multiplicity::<LB>(slot0, selectors);
+                            let slot1_multiplicity =
+                                narrow_slot_multiplicity::<LB>(slot1, selectors);
+                            let slot0_encoding = narrow_slot_encoding::<LB, _>(
+                                &*group, local, next, selectors, slot0,
+                            );
+                            let slot1_encoding = narrow_slot_encoding::<LB, _>(
+                                &*group, local, next, selectors, slot1,
+                            );
+
+                            group.selected_batch2_encoded(
+                                "narrow_pair",
+                                "slot0",
+                                slot0_multiplicity,
+                                || slot0_encoding,
+                                "slot1",
+                                slot1_multiplicity,
+                                || slot1_encoding,
+                            );
+                        },
+                        FOOTER_INPUT_COLUMN => {
+                            // The linear CV and external-input denominators are batched with
+                            // degree-one and degree-two multiplicities, giving degree two for U
+                            // and degree three for V. The external-input denominator remains in
+                            // the cross product when its multiplicity is zero; its unit alpha
+                            // coefficient prevents an identically zero cancellation. The
+                            // inactive-row constraint pins this column when both multiplicities are
+                            // zero.
+                            let mode = LB::Expr::from(local.columns[F_MODE_COL]);
+                            let is_f3 = selectors.is_footer_row(FOOTER_ROWS - 1);
+                            let cv_multiplicity = is_f3.clone() - selectors.is_first_fused();
+                            let input_multiplicity = -is_f3
+                                * (LB::Expr::from(local.columns[F_COMPRESSION_MULTIPLICITY_COL])
+                                    + mode.clone());
+                            group.batch(
+                                "full_cv_and_external_input",
+                                LB::Expr::ONE,
+                                |batch| {
+                                    batch.insert(
+                                        "full_cv",
+                                        cv_multiplicity,
+                                        FullCvMsg {
+                                            compression_cycle_id: LB::Expr::from(
+                                                local.columns[F_COMPRESSION_CYCLE_ID_COL],
+                                            ),
+                                            words: core::array::from_fn(|idx| {
+                                                cv_word::<LB>(local, idx)
+                                            }),
+                                        },
+                                        Deg { v: 1, u: 1 },
+                                    );
+                                    batch.insert(
+                                        "compression_or_aead_input",
+                                        input_multiplicity,
+                                        FooterInputMsg {
+                                            mode,
+                                            block: footer_block::<LB>(local),
+                                            cv_in: core::array::from_fn(|idx| {
+                                                pack_pair::<LB>(
+                                                    cv_word::<LB>(local, 2 * idx),
+                                                    cv_word::<LB>(local, 2 * idx + 1),
+                                                )
+                                            }),
+                                            tail: core::array::from_fn(|idx| {
+                                                LB::Expr::from(
+                                                    local.columns[footer_interface_tail_col(idx)],
+                                                )
+                                            }),
+                                        },
+                                        Deg { v: 2, u: 1 },
+                                    );
+                                },
+                                FOOTER_INPUT_DEG,
+                            );
+                        },
+                        FOOTER_OUTPUT_COLUMN => {
+                            // Both output relations are active only in AEAD mode. Their shared
+                            // degree-two multiplicity gives degree two for U and degree three for
+                            // V; the inactive-row constraint pins this column everywhere else,
+                            // including when a denominator is zero.
+                            let mode = LB::Expr::from(local.columns[F_MODE_COL]);
+                            let multiplicity = -selectors.is_footer() * mode;
+                            group.batch(
+                                "aead_output_pairs",
+                                LB::Expr::ONE,
+                                |batch| {
+                                    batch.insert(
+                                        "aead_low_output_pair",
+                                        multiplicity.clone(),
+                                        aead_output_pair_msg_for_current_footer::<LB>(
+                                            local, selectors, 0,
+                                        ),
+                                        Deg { v: 2, u: 1 },
+                                    );
+                                    batch.insert(
+                                        "aead_high_output_pair",
+                                        multiplicity,
+                                        aead_output_pair_msg_for_current_footer::<LB>(
+                                            local, selectors, 8,
+                                        ),
+                                        Deg { v: 2, u: 1 },
+                                    );
+                                },
+                                FOOTER_OUTPUT_BATCH2_DEG,
+                            );
+                        },
+                        _ => unreachable!("32-row EidosCompression lookup aux column out of range"),
+                    },
                     column_deg,
                 );
             },
             column_deg,
         );
-    }
-}
-
-fn emit_lookup_column<LB, G>(
-    group: &mut G,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-    aux_col: usize,
-) where
-    LB: EidosCompressionLookupBuilder,
-    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
-{
-    match aux_col {
-        0..NARROW_BATCH_COLUMNS => {
-            emit_narrow_pair::<LB, G>(group, local, next, selectors, aux_col)
-        },
-        FOOTER_INPUT_COLUMN..=FOOTER_OUTPUT_COLUMN => {
-            emit_footer_column::<LB, G>(group, local, selectors, aux_col)
-        },
-        _ => unreachable!("32-row EidosCompression lookup aux column out of range"),
-    }
-}
-
-fn emit_narrow_pair<LB, G>(
-    group: &mut G,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-    aux_col: usize,
-) where
-    LB: EidosCompressionLookupBuilder,
-    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
-{
-    let slot0 = 2 * aux_col;
-    let slot1 = slot0 + 1;
-    let slot0_multiplicity = narrow_slot_multiplicity::<LB>(slot0, selectors);
-    let slot1_multiplicity = narrow_slot_multiplicity::<LB>(slot1, selectors);
-    let slot0_encoding = narrow_slot_encoding::<LB, G>(&*group, local, next, selectors, slot0);
-    let slot1_encoding = narrow_slot_encoding::<LB, G>(&*group, local, next, selectors, slot1);
-
-    group.selected_batch2_encoded(
-        "narrow_pair",
-        "slot0",
-        slot0_multiplicity,
-        || slot0_encoding,
-        "slot1",
-        slot1_multiplicity,
-        || slot1_encoding,
-    );
-}
-
-fn emit_footer_column<LB, G>(
-    group: &mut G,
-    local: &EidosCompressionCols<LB::Var>,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-    aux_col: usize,
-) where
-    LB: EidosCompressionLookupBuilder,
-    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
-{
-    let mode = c::<LB>(local, F_MODE_COL);
-    let is_f3 = selectors.is_footer_row(FOOTER_ROWS - 1);
-
-    match aux_col {
-        FOOTER_INPUT_COLUMN => {
-            // Both denominators are linear. The CV multiplicity has degree one and the selected
-            // external-input multiplicity has degree two, so the batched U has degree two and V
-            // has degree three. On the first fused row, and on a zero-multiplicity compression
-            // padding footer, the external-input denominator remains in the cross product with
-            // zero multiplicity. Its alpha coefficient is one, so it cannot vanish identically;
-            // cancellation is limited to the standard random-denominator bad event. This layout
-            // has at most 40 denominator factors per row, versus at most 44 in the 24-column
-            // layout. The handwritten auxiliary pin covers rows where both relations are inactive.
-            let cv_multiplicity = is_f3.clone() - selectors.is_first_fused();
-            let input_multiplicity =
-                -is_f3 * (c::<LB>(local, F_COMPRESSION_MULTIPLICITY_COL) + mode.clone());
-            group.batch(
-                "full_cv_and_external_input",
-                LB::Expr::ONE,
-                |batch| {
-                    batch.insert(
-                        "full_cv",
-                        cv_multiplicity,
-                        full_cv_msg::<LB>(local),
-                        Deg { v: 1, u: 1 },
-                    );
-                    batch.insert(
-                        "compression_or_aead_input",
-                        input_multiplicity,
-                        footer_input_msg::<LB>(local, mode),
-                        Deg { v: 2, u: 1 },
-                    );
-                },
-                FOOTER_INPUT_DEG,
-            );
-        },
-        FOOTER_OUTPUT_COLUMN => {
-            // Both outputs are active together in AEAD mode. A separate handwritten extension
-            // constraint pins this auxiliary column to zero on every other row, including when
-            // either denominator is zero. Each denominator is linear and the common multiplicity
-            // has degree two, giving degree two for U and degree three for V.
-            let multiplicity = -selectors.is_footer() * mode;
-            group.batch(
-                "aead_output_pairs",
-                LB::Expr::ONE,
-                |batch| {
-                    batch.insert(
-                        "aead_low_output_pair",
-                        multiplicity.clone(),
-                        aead_output_pair_msg_for_current_footer::<LB>(local, selectors, 0),
-                        Deg { v: 2, u: 1 },
-                    );
-                    batch.insert(
-                        "aead_high_output_pair",
-                        multiplicity,
-                        aead_output_pair_msg_for_current_footer::<LB>(local, selectors, 8),
-                        Deg { v: 2, u: 1 },
-                    );
-                },
-                FOOTER_OUTPUT_BATCH2_DEG,
-            );
-        },
-        _ => unreachable!("32-row Eidos compression footer aux column out of range"),
     }
 }
 
@@ -395,7 +380,7 @@ where
         0..=17 => -(fused + footer),
         18..=21 | 27 | 30..=31 => -fused,
         22..=26 | 28..=29 => -(fused + footer),
-        32..=35 => fused - expr::<LB>(7) * footer,
+        32..=35 => fused - LB::Expr::from_u64(7) * footer,
         _ => unreachable!("32-row EidosCompression narrow slot out of range"),
     }
 }
@@ -414,25 +399,40 @@ where
     let mut encoded = G::ExprEF::ZERO;
 
     if slot <= 15 {
-        add_bus(&mut encoded, group, BusId::And8Lookup, is_fused::<LB>(selectors));
-        add_bus(&mut encoded, group, BusId::And8Lookup, selectors.is_footer());
+        // These byte slots carry And8 relations on fused and footer rows.
+        encoded += group.bus_prefix(BusId::And8Lookup as usize) * is_fused::<LB>(selectors);
+        encoded += group.bus_prefix(BusId::And8Lookup as usize) * selectors.is_footer();
     } else if slot <= 31 {
-        add_rot_bus::<LB, G>(&mut encoded, group, slot, selectors);
-        add_footer_overlay_slot::<LB, G>(&mut encoded, group, selectors, slot);
+        // Fused rows use these slots for rotations; footer rows reuse them for And8 and range
+        // relations.
+        let byte = slot % BYTES_PER_WORD;
+        encoded += group.bus_prefix(eidos_compression_rot12_bus(byte) as usize) * selectors.is_ab();
+        encoded += group.bus_prefix(eidos_compression_rot7_bus(byte) as usize) * selectors.is_cd();
+
+        let footer = selectors.is_footer();
+        match slot {
+            16 => {
+                encoded += group.bus_prefix(BusId::And8Lookup as usize) * footer;
+            },
+            17 | 22..=26 | 28..=29 => {
+                encoded += group.bus_prefix(BusId::RangeCheck as usize) * footer;
+            },
+            _ => {},
+        }
     } else if slot <= 35 {
-        add_bus(
-            &mut encoded,
-            group,
-            BusId::EidosCompressionMessageWord,
-            is_fused::<LB>(selectors) + selectors.is_footer(),
-        );
+        encoded += group.bus_prefix(BusId::EidosCompressionMessageWord as usize)
+            * (is_fused::<LB>(selectors) + selectors.is_footer());
     } else {
         unreachable!("32-row EidosCompression narrow slot out of range");
     }
 
+    // Route every inactive slot to the range-check bus.
     let activity = narrow_slot_activity::<LB>(slot, selectors);
-    add_bus(&mut encoded, group, BusId::RangeCheck, LB::Expr::ONE - activity);
-    add_fields_direct(&mut encoded, group, narrow_slot_fields::<LB>(local, next, selectors, slot));
+    encoded += group.bus_prefix(BusId::RangeCheck as usize) * (LB::Expr::ONE - activity);
+    let fields = narrow_slot_fields::<LB>(local, next, selectors, slot);
+    for (idx, field) in fields.into_iter().enumerate() {
+        encoded += group.beta_powers()[idx].clone() * field;
+    }
     encoded
 }
 
@@ -450,127 +450,35 @@ where
     }
 }
 
-fn add_footer_overlay_slot<LB, G>(
-    encoded: &mut G::ExprEF,
-    group: &G,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-    slot: usize,
-) where
-    LB: EidosCompressionLookupBuilder,
-    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
-{
-    let branch = selectors.is_footer();
-    match slot {
-        16 => {
-            add_bus(encoded, group, BusId::And8Lookup, branch);
-        },
-        17 | 22..=26 | 28..=29 => {
-            add_bus(encoded, group, BusId::RangeCheck, branch);
-        },
-        _ => {},
-    }
-}
-
-fn add_rot_bus<LB, G>(
-    encoded: &mut G::ExprEF,
-    group: &G,
-    slot: usize,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-) where
-    LB: EidosCompressionLookupBuilder,
-    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
-{
-    let byte = slot % BYTES_PER_WORD;
-    add_bus(encoded, group, eidos_compression_rot12_bus(byte), selectors.is_ab());
-    add_bus(encoded, group, eidos_compression_rot7_bus(byte), selectors.is_cd());
-}
-
-fn add_bus<G>(encoded: &mut G::ExprEF, group: &G, bus: BusId, selector: G::Expr)
-where
-    G: LookupGroup,
-{
-    *encoded = encoded.clone() + group.bus_prefix(bus as usize) * selector;
-}
-
-fn add_fields_direct<G>(encoded: &mut G::ExprEF, group: &G, fields: [G::Expr; 3])
-where
-    G: LookupGroup,
-{
-    for (idx, field) in fields.into_iter().enumerate() {
-        *encoded = encoded.clone() + group.beta_powers()[idx].clone() * field;
-    }
-}
-
-fn footer_input_msg<LB>(
-    local: &EidosCompressionCols<LB::Var>,
-    mode: LB::Expr,
-) -> FooterInputMsg<LB::Expr>
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    FooterInputMsg {
-        mode,
-        block: footer_block::<LB>(local),
-        cv_in: footer_cv_in::<LB>(local),
-        tail: footer_tail::<LB>(local),
-    }
-}
-
-fn full_cv_msg<LB>(local: &EidosCompressionCols<LB::Var>) -> FullCvMsg<LB::Expr>
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    FullCvMsg {
-        compression_cycle_id: c::<LB>(local, F_COMPRESSION_CYCLE_ID_COL),
-        words: core::array::from_fn(|idx| cv_word::<LB>(local, idx)),
-    }
-}
-
 fn footer_block<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 8]
 where
     LB: EidosCompressionLookupBuilder,
 {
     core::array::from_fn(|idx| {
         if idx < 6 {
-            c::<LB>(local, footer_r_col(FOOTER_ROWS - 1, idx))
+            LB::Expr::from(local.columns[footer_r_col(FOOTER_ROWS - 1, idx)])
         } else {
             let pair = idx - 6;
             pack_pair::<LB>(
-                c::<LB>(local, footer_msg_word_col(2 * pair)),
-                c::<LB>(local, footer_msg_word_col(2 * pair + 1)),
+                LB::Expr::from(local.columns[footer_msg_word_col(2 * pair)]),
+                LB::Expr::from(local.columns[footer_msg_word_col(2 * pair + 1)]),
             )
         }
     })
-}
-
-fn footer_cv_in<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 4]
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    core::array::from_fn(|idx| {
-        pack_pair::<LB>(cv_word::<LB>(local, 2 * idx), cv_word::<LB>(local, 2 * idx + 1))
-    })
-}
-
-fn footer_tail<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 4]
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    core::array::from_fn(|idx| c::<LB>(local, footer_interface_tail_col(idx)))
 }
 
 fn cv_word<LB>(local: &EidosCompressionCols<LB::Var>, idx: usize) -> LB::Expr
 where
     LB: EidosCompressionLookupBuilder,
 {
-    universal_cv_word(|col| c::<LB>(local, col), idx)
+    universal_cv_word(|col| LB::Expr::from(local.columns[col]), idx)
 }
 
 fn pack_pair<LB>(lo: LB::Expr, hi: LB::Expr) -> LB::Expr
 where
     LB: EidosCompressionLookupBuilder,
 {
-    lo + expr::<LB>(1u64 << 32) * hi
+    lo + LB::Expr::from_u64(1u64 << 32) * hi
 }
 
 fn aead_output_pair_msg_for_current_footer<LB>(
@@ -582,47 +490,33 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     let footer_idx = selectors.is_footer_row(1)
-        + expr::<LB>(2) * selectors.is_footer_row(2)
-        + expr::<LB>(3) * selectors.is_footer_row(3);
+        + LB::Expr::from_u64(2) * selectors.is_footer_row(2)
+        + LB::Expr::from_u64(3) * selectors.is_footer_row(3);
     let [value0, value1] = if lane_offset == 0 {
-        footer_output_word::<LB>(local)
+        [
+            footer_xor_word::<LB>(local, F_OUTPUT_EVEN_SLOT_BASE),
+            footer_xor_word::<LB>(local, F_OUTPUT_ODD_SLOT_BASE),
+        ]
     } else {
-        footer_high_word::<LB>(local)
+        [
+            footer_xor_word::<LB>(local, F_HIGH_EVEN_SLOT_BASE),
+            footer_xor_word::<LB>(local, F_HIGH_ODD_SLOT_BASE),
+        ]
     };
 
     AeadEidosCompressionOutputPairMsg {
-        clk: c::<LB>(local, F_CLK_COL),
-        first_lane_idx: expr::<LB>(lane_offset as u64) + expr::<LB>(2) * footer_idx,
+        clk: LB::Expr::from(local.columns[F_CLK_COL]),
+        first_lane_idx: LB::Expr::from_u64(lane_offset as u64) + LB::Expr::from_u64(2) * footer_idx,
         value0,
         value1,
     }
-}
-
-fn footer_output_word<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 2]
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    [
-        footer_xor_word::<LB>(local, F_OUTPUT_EVEN_SLOT_BASE),
-        footer_xor_word::<LB>(local, F_OUTPUT_ODD_SLOT_BASE),
-    ]
-}
-
-fn footer_high_word<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 2]
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    [
-        footer_xor_word::<LB>(local, F_HIGH_EVEN_SLOT_BASE),
-        footer_xor_word::<LB>(local, F_HIGH_ODD_SLOT_BASE),
-    ]
 }
 
 fn footer_xor_word<LB>(local: &EidosCompressionCols<LB::Var>, slot_base: usize) -> LB::Expr
 where
     LB: EidosCompressionLookupBuilder,
 {
-    pack4::<LB>(
+    pack_u32_le(
         footer_xor_byte::<LB>(local, slot_base),
         footer_xor_byte::<LB>(local, slot_base + 1),
         footer_xor_byte::<LB>(local, slot_base + 2),
@@ -635,9 +529,9 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     let base = footer_xor_slot_col(slot, 0);
-    let lhs = c::<LB>(local, base);
-    let rhs = c::<LB>(local, base + 1);
-    let and = c::<LB>(local, base + 2);
+    let lhs = LB::Expr::from(local.columns[base]);
+    let rhs = LB::Expr::from(local.columns[base + 1]);
+    let and = LB::Expr::from(local.columns[base + 2]);
     xor_from_and(lhs, rhs, and)
 }
 
@@ -651,18 +545,32 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     match slot {
-        0..=30 => fields_at::<LB>(local, byte_slot_base(0, slot)),
+        0..=30 => {
+            let base = byte_slot_base(0, slot);
+            [
+                LB::Expr::from(local.columns[base]),
+                LB::Expr::from(local.columns[base + 1]),
+                LB::Expr::from(local.columns[base + 2]),
+            ]
+        },
         31 => [
-            c::<LB>(local, g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)),
-            c::<LB>(local, g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)),
-            missing_rotation_result(|col| c::<LB>(local, col), |col| c::<LB>(next, col)),
+            LB::Expr::from(
+                local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)],
+            ),
+            LB::Expr::from(
+                local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)],
+            ),
+            missing_rotation_result(
+                |col| LB::Expr::from(local.columns[col]),
+                |col| LB::Expr::from(next.columns[col]),
+            ),
         ],
         32..=35 => {
             let g = slot - 32;
             [
                 message_index::<LB>(selectors, g),
-                c::<LB>(local, g_msg_word_col(g)),
-                c::<LB>(local, G_COMPRESSION_CYCLE_ID_COL),
+                LB::Expr::from(local.columns[g_msg_word_col(g)]),
+                LB::Expr::from(local.columns[G_COMPRESSION_CYCLE_ID_COL]),
             ]
         },
         _ => unreachable!("32-row EidosCompression narrow slot out of range"),
@@ -675,16 +583,11 @@ where
 {
     let footer = selectors.is_footer();
     let footer_idx = selectors.is_footer_row(1)
-        + expr::<LB>(2) * selectors.is_footer_row(2)
-        + expr::<LB>(3) * selectors.is_footer_row(3);
-    selectors.sigma_msg_index(g) + expr::<LB>(g as u64) * footer + expr::<LB>(4) * footer_idx
-}
-
-fn fields_at<LB>(local: &EidosCompressionCols<LB::Var>, base: usize) -> [LB::Expr; 3]
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    [c::<LB>(local, base), c::<LB>(local, base + 1), c::<LB>(local, base + 2)]
+        + LB::Expr::from_u64(2) * selectors.is_footer_row(2)
+        + LB::Expr::from_u64(3) * selectors.is_footer_row(3);
+    selectors.sigma_msg_index(g)
+        + LB::Expr::from_u64(g as u64) * footer
+        + LB::Expr::from_u64(4) * footer_idx
 }
 
 fn is_fused<LB>(selectors: &EidosCompressionSelectors<LB::Expr>) -> LB::Expr
@@ -692,29 +595,6 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     selectors.is_ab() + selectors.is_cd()
-}
-
-#[inline]
-fn c<LB>(local: &EidosCompressionCols<LB::Var>, idx: usize) -> LB::Expr
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    local.columns[idx].into()
-}
-
-#[inline]
-fn expr<LB>(value: u64) -> LB::Expr
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    LB::Expr::from(Felt::new_unchecked(value))
-}
-
-fn pack4<LB>(b0: LB::Expr, b1: LB::Expr, b2: LB::Expr, b3: LB::Expr) -> LB::Expr
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    pack_u32_le(b0, b1, b2, b3)
 }
 
 #[cfg(test)]

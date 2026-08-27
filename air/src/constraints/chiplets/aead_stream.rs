@@ -52,51 +52,29 @@ pub fn enforce_aead_stream_constraints<AB>(
     let stream = selectors.stream_mode.aead_stream.clone();
     let stream_next = aead_stream_active_next::<AB>(next);
 
-    enforce_phase_alignment(builder, selectors, stream.clone(), stream_next, phases[7].clone());
-    enforce_carry_constraints(builder, cols, cols_next, stream, &phases);
-}
-
-// PHASE ALIGNMENT
-// ================================================================================================
-
-fn enforce_phase_alignment<AB>(
-    builder: &mut AB,
-    selectors: &ChipletSelectors<AB::Expr>,
-    stream: AB::Expr,
-    stream_next: AB::Expr,
-    r7: AB::Expr,
-) where
-    AB: MidenAirBuilder,
-{
+    // Align stream entry boundaries with the eight-row phase cycle.
     builder
         .when(selectors.bitwise.next_is_first.clone() * stream_next.clone())
-        .assert_one(r7.clone());
+        .assert_one(phases[7].clone());
 
-    builder.when(stream.not() * stream_next.clone()).assert_one(r7.clone());
+    builder
+        .when(stream.clone().not() * stream_next.clone())
+        .assert_one(phases[7].clone());
 
-    builder.when(stream * r7.not()).assert_one(stream_next);
+    builder.when(stream.clone() * phases[7].clone().not()).assert_one(stream_next);
+
+    // Carry the first and second plaintext pairs across their row phases.
+    carry_read_to_high_first(builder, stream.clone() * phases[0].clone(), cols, cols_next, 0);
+    carry_high_first_to_low_second(builder, stream.clone() * phases[1].clone(), cols, cols_next);
+    carry_low_second_to_high_second(builder, stream.clone() * phases[2].clone(), cols, cols_next);
+
+    carry_read_to_high_first(builder, stream.clone() * phases[4].clone(), cols, cols_next, 2);
+    carry_high_first_to_low_second(builder, stream.clone() * phases[5].clone(), cols, cols_next);
+    carry_low_second_to_high_second(builder, stream * phases[6].clone(), cols, cols_next);
 }
 
 // CARRY CONSTRAINTS
 // ================================================================================================
-
-fn enforce_carry_constraints<AB>(
-    builder: &mut AB,
-    cols: &AeadStreamCols<AB::Var>,
-    cols_next: &AeadStreamCols<AB::Var>,
-    stream: AB::Expr,
-    r: &[AB::Expr; 8],
-) where
-    AB: MidenAirBuilder,
-{
-    carry_read_to_high_first(builder, stream.clone() * r[0].clone(), cols, cols_next, 0);
-    carry_high_first_to_low_second(builder, stream.clone() * r[1].clone(), cols, cols_next);
-    carry_low_second_to_high_second(builder, stream.clone() * r[2].clone(), cols, cols_next);
-
-    carry_read_to_high_first(builder, stream.clone() * r[4].clone(), cols, cols_next, 2);
-    carry_high_first_to_low_second(builder, stream.clone() * r[5].clone(), cols, cols_next);
-    carry_low_second_to_high_second(builder, stream * r[6].clone(), cols, cols_next);
-}
 
 fn carry_read_to_high_first<AB>(
     builder: &mut AB,
@@ -224,7 +202,7 @@ pub(crate) fn a_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
 where
     AB: MidenAirBuilder,
 {
-    pack_u32::<AB>([bytes[0], bytes[1], bytes[2], bytes[3]])
+    pack_u32_bytes_le::<_, AB::Expr>([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
 pub(crate) fn xor_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
@@ -243,11 +221,4 @@ where
             - two * Into::<AB::Expr>::into(bytes[11]),
     ];
     pack_u32_bytes_le::<_, AB::Expr>(xor_bytes)
-}
-
-fn pack_u32<AB>(bytes: [AB::Var; 4]) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    pack_u32_bytes_le::<_, AB::Expr>(bytes)
 }

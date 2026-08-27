@@ -25,50 +25,46 @@ impl<T: Clone> EidosCompressionSelectors<T> {
     }
 
     pub fn is_ab(&self) -> T {
-        self.read(P_IS_AB)
+        self.columns[P_IS_AB].clone()
     }
 
     pub fn is_cd(&self) -> T {
-        self.read(P_IS_CD)
+        self.columns[P_IS_CD].clone()
     }
 
     pub fn is_diag(&self) -> T {
-        self.read(P_IS_DIAG)
+        self.columns[P_IS_DIAG].clone()
     }
 
     pub fn is_first_fused(&self) -> T {
-        self.read(P_IS_FIRST_FUSED)
+        self.columns[P_IS_FIRST_FUSED].clone()
     }
 
     pub fn is_last_fused(&self) -> T {
-        self.read(P_IS_LAST_FUSED)
+        self.columns[P_IS_LAST_FUSED].clone()
     }
 
     pub fn is_footer(&self) -> T {
-        self.read(P_IS_FOOTER)
+        self.columns[P_IS_FOOTER].clone()
     }
 
     pub fn is_footer_row(&self, footer: usize) -> T {
         match footer {
-            0 => self.read(P_IS_F0),
-            1 => self.read(P_IS_F1),
-            2 => self.read(P_IS_F2),
-            3 => self.read(P_IS_F3),
+            0 => self.columns[P_IS_F0].clone(),
+            1 => self.columns[P_IS_F1].clone(),
+            2 => self.columns[P_IS_F2].clone(),
+            3 => self.columns[P_IS_F3].clone(),
             _ => panic!("footer selector index out of bounds"),
         }
     }
 
     pub fn sigma_msg_index(&self, lane: usize) -> T {
         match lane {
-            0 => self.read(P_SIGMA_MSG_0),
-            1 => self.read(P_SIGMA_MSG_1),
-            2 => self.read(P_SIGMA_MSG_2),
-            3 => self.read(P_SIGMA_MSG_3),
+            0 => self.columns[P_SIGMA_MSG_0].clone(),
+            1 => self.columns[P_SIGMA_MSG_1].clone(),
+            2 => self.columns[P_SIGMA_MSG_2].clone(),
+            3 => self.columns[P_SIGMA_MSG_3].clone(),
             _ => panic!("sigma lane index out of bounds"),
         }
-    }
-
-    fn read(&self, column: usize) -> T {
-        self.columns[column].clone()
     }
 }

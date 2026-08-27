@@ -359,12 +359,5 @@ fn stream_b_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
 where
     LB: ChipletLookupBuilder,
 {
-    pack_u32::<LB>([bytes[4], bytes[5], bytes[6], bytes[7]])
-}
-
-fn pack_u32<LB>(bytes: [LB::Var; 4]) -> LB::Expr
-where
-    LB: ChipletLookupBuilder,
-{
-    pack_u32_bytes_le::<_, LB::Expr>(bytes)
+    pack_u32_bytes_le::<_, LB::Expr>([bytes[4], bytes[5], bytes[6], bytes[7]])
 }
