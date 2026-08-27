@@ -41,7 +41,7 @@ use miden_core::{
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
-        Preprocessed, PreprocessedValidationError, StarkConfig, VerifierInstance,
+        PreprocessedValidationError, StarkConfig, VerifierInstance,
         lmcs::{Lmcs, proof::BatchProofView},
         pcs::{PcsParams, PcsProof},
         proof::{StarkProof, StarkProofData},
@@ -51,7 +51,7 @@ use miden_crypto::{
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::{SerdeCompat, wincode};
 
-use crate::MAX_STARK_PROOF_BYTES;
+use crate::{MAX_STARK_PROOF_BYTES, eidos_preprocessed_commitment};
 
 // TYPES
 // ================================================================================================
@@ -200,8 +200,7 @@ fn build_from_proof_bytes(
     let statement =
         Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
             .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
-    let preprocessed_commitment =
-        Preprocessed::build(&statement, &config).map(|preprocessed| preprocessed.commitment());
+    let preprocessed_commitment = Some(eidos_preprocessed_commitment());
     let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
@@ -492,6 +491,7 @@ mod tests {
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{StarkProof as CoreStarkProof, VmProof},
     };
+    use miden_crypto::stark::Preprocessed;
 
     use super::*;
 
@@ -542,7 +542,7 @@ mod tests {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![Felt::ZERO; 32],
+            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
             vec![],
         )
         .expect("valid Miden statement shape");
@@ -551,16 +551,8 @@ mod tests {
             .commitment()
             .into();
 
-        // Must match AND8_PREPROCESSED_TRACE_COM_{0..3} in sys/vm/mod.masm.
-        assert_eq!(
-            commitment,
-            [
-                8101824786889297799,
-                5557459202643843712,
-                8609469204800341145,
-                5780773595731865481,
-            ]
-        );
+        let fixed: [u64; 4] = eidos_preprocessed_commitment().into();
+        assert_eq!(commitment, fixed);
     }
 
     #[test]
