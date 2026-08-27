@@ -204,21 +204,31 @@ end
 #! - BLOCK_LO and BLOCK_HI are the final preserved block words; CV is the final digest.
 #!
 pub proc pipe_words_to_memory
-  # check if there is an odd number of words
-  dup is_odd
-  # => [is_odd, num_words, write_ptr, ...]
+  dup eq.0
+  if.true
+    # Reuse the element hasher's canonical empty-input path while preserving write_ptr.
+    drop dup push.0 swap
+    # => [write_ptr, num_elements=0, write_ptr, ...]
+    exec.eidos::hash_elements
+    padw padw
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr, ...]
+  else
+    # check if there is an odd number of words
+    dup is_odd
+    # => [is_odd, num_words, write_ptr, ...]
 
-  # copy is_odd, it defines if last word requires padding
-  dup movdn.3
-  # => [is_odd, num_words, write_ptr, needs_padding, ...]
+    # copy is_odd, it defines if last word requires padding
+    dup movdn.3
+    # => [is_odd, num_words, write_ptr, needs_padding, ...]
 
-  # Compute `end_ptr` for the even-word prefix and initialize Eidos with the full Felt length.
-  dup.1 mul.4 movdn.2
-  sub mul.4 dup.2 add movup.2
-  movup.2 exec.eidos::init_chaining_word
-  # => [CV, write_ptr, end_ptr, needs_padding, ...]
+    # Compute `end_ptr` for the even-word prefix and initialize Eidos with the full Felt length.
+    dup.1 mul.4 movdn.2
+    sub mul.4 dup.2 add movup.2
+    movup.2 exec.eidos::init_chaining_word
+    # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
-  exec.pipe_words_to_memory_with_cv
+    exec.pipe_words_to_memory_with_cv
+  end
 end
 
 #! Copies advice words to memory while computing their domain-tagged hash.
@@ -311,27 +321,36 @@ end
 #! - COMMITMENT is the commitment that the one calculated during this procedure will be compared
 #!   with.
 pub proc pipe_double_words_preimage_to_memory
-  # Assert precondition.
-  dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
-  # => [num_words, write_ptr, COMMITMENT, ...]
+  dup eq.0
+  if.true
+    # Reuse the element hasher's canonical empty-input path while preserving write_ptr.
+    drop dup push.0 swap
+    # => [write_ptr, num_elements=0, write_ptr, COMMITMENT, ...]
+    exec.eidos::hash_elements
+    # => [DIGEST, write_ptr, COMMITMENT, ...]
+  else
+    # Assert precondition.
+    dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
+    # => [num_words, write_ptr, COMMITMENT, ...]
 
-  # Compute end_ptr and initialize the Eidos CV with the committed Felt length.
-  dup mul.4 dup dup.3 add
-  movup.2 drop movup.2
-  # => [write_ptr, end_ptr, num_elements, COMMITMENT, ...]
+    # Compute end_ptr and initialize the Eidos CV with the committed Felt length.
+    dup mul.4 dup dup.3 add
+    movup.2 drop movup.2
+    # => [write_ptr, end_ptr, num_elements, COMMITMENT, ...]
 
-  movup.2 exec.eidos::init_chaining_word
-  # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
+    movup.2 exec.eidos::init_chaining_word
+    # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
 
-  padw padw
-  # => [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr, COMMITMENT, ...]
+    padw padw
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr, COMMITMENT, ...]
 
-  exec.pipe_double_words_to_memory
-  # => [BLOCK_LO, BLOCK_HI, CV, write_ptr', COMMITMENT, ...]
+    exec.pipe_double_words_to_memory
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr', COMMITMENT, ...]
 
-  # Leave just the digest on the stack.
-  exec.eidos::digest
-  # => [DIGEST, write_ptr', COMMITMENT, ...]
+    # Leave just the digest on the stack.
+    exec.eidos::digest
+    # => [DIGEST, write_ptr', COMMITMENT, ...]
+  end
 
   # Move write_ptr out of the way so we can assert the commitment.
   movup.4 movdn.8

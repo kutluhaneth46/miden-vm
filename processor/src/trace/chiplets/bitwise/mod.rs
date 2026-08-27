@@ -4,6 +4,7 @@ use core::{borrow::BorrowMut, mem::size_of};
 use miden_air::{
     AeadStreamCols, BitwiseCols,
     trace::{
+        CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{
             BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_PAIR_ROWS, byte_lookup_result,
         },
@@ -12,6 +13,7 @@ use miden_air::{
 };
 use miden_core::{chiplets::eidos_compression, field::Field};
 
+use super::BITWISE_COL_START;
 use crate::{Felt, ONE, ZERO, operation::OperationError, trace::ChipletTraceFragment};
 
 #[cfg(test)]
@@ -26,6 +28,8 @@ pub(crate) const AEAD_STREAM_CYCLE_LEN: usize = 8;
 const AEAD_STREAM_WIDTH: usize = size_of::<AeadStreamCols<u8>>();
 const STREAM_MODE_OFFSET: usize = AEAD_STREAM_WIDTH;
 pub(crate) const AEAD_STREAM_FRAGMENT_WIDTH: usize = STREAM_MODE_OFFSET + 1;
+
+const _: () = assert!(BITWISE_COL_START + STREAM_MODE_OFFSET == CHIPLETS_STREAM_MODE_COL);
 
 // BITWISE OPERATION
 // ================================================================================================

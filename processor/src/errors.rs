@@ -307,6 +307,8 @@ pub enum OperationError {
     CircularExternalNode(Word),
     #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
+    #[error("Eidos domain must fit in 31 bits, but was {domain}")]
+    EidosDomainOutOfRange { domain: Felt },
     #[error(transparent)]
     Deferred(#[from] PrecompileError),
     #[error(

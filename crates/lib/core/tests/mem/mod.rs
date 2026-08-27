@@ -316,6 +316,40 @@ fn test_pipe_words_to_memory() {
     );
 }
 
+#[test]
+fn pipe_words_to_memory_hashes_empty_input_canonically() {
+    use miden_core::chiplets::hasher;
+
+    const MEM_ADDR: u64 = 1000;
+    const CANARY: [u64; 4] = [41, 42, 43, 44];
+    let source = format!(
+        "
+        use miden::core::mem
+        use miden::core::crypto::hashes::eidos
+        use miden::core::sys
+
+        begin
+            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+
+            push.{MEM_ADDR} push.0
+            exec.mem::pipe_words_to_memory
+            exec.eidos::digest
+            movup.4 eq.{MEM_ADDR} assert
+            exec.sys::truncate_stack
+        end
+        "
+    );
+
+    let digest = hasher::hash_elements(&[]);
+    let mut expected_stack = felt_slice_to_ints(digest.as_elements());
+    expected_stack.resize(16, 0);
+    build_test!(source.as_str(), &[]).expect_stack_and_memory(
+        &expected_stack,
+        MEM_ADDR as u32,
+        &CANARY,
+    );
+}
+
 /// The advice pipe, the memory-based hasher, and the native hasher must agree for empty, odd,
 /// even, and maximum-size inputs. A second domain checks that the pipe does not bake in the
 /// kernel tag.
@@ -452,6 +486,37 @@ fn test_pipe_double_words_preimage_to_memory() {
         &[mem_addr + (4u64 * 4u64)],
         mem_addr as u32,
         data,
+    );
+}
+
+#[test]
+fn pipe_double_words_preimage_to_memory_accepts_canonical_empty_hash() {
+    use miden_core::chiplets::hasher;
+
+    const MEM_ADDR: u64 = 1000;
+    const CANARY: [u64; 4] = [41, 42, 43, 44];
+    let source = format!(
+        "
+        use miden::core::mem
+
+        begin
+            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+
+            padw adv_loadw
+            push.{MEM_ADDR}
+            push.0
+            exec.mem::pipe_double_words_preimage_to_memory
+            swap drop
+        end
+        "
+    );
+
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.append_word(hasher::hash_elements(&[]));
+    build_test!(source.as_str(), &[], advice_stack).expect_stack_and_memory(
+        &[MEM_ADDR],
+        MEM_ADDR as u32,
+        &CANARY,
     );
 }
 

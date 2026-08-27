@@ -340,7 +340,7 @@ fn assert_recursive_verifier_rejects(data: VerifierData, message: &str) {
 
 #[test]
 fn folding_reseed_helper_matches_reference_sampler() {
-    fn source(use_combined_helper: bool) -> String {
+    fn source(use_combined_helper: bool, pow_bits: usize) -> String {
         let sample = if use_combined_helper {
             "
             push.41.31.29.23 push.0
@@ -350,9 +350,7 @@ fn folding_reseed_helper_matches_reference_sampler() {
             "
             push.41.31.29.23 push.0
             exec.random_coin::reseed_with_felt
-            # With a zero grinding factor the canonical path validates a zero nonce without
-            # consuming a transcript sample for a vacuous bit check.
-            exec.random_coin::sample_ext
+            exec.random_coin::sample_folding_pow_and_ext
             "
         };
 
@@ -363,7 +361,7 @@ fn folding_reseed_helper_matches_reference_sampler() {
             use miden::core::stark::random_coin
 
             begin
-                push.0 exec.constants::set_folding_pow_bits
+                push.{pow_bits} exec.constants::set_folding_pow_bits
                 push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
                 exec.random_coin::eidos_clear_buffer
                 push.0 exec.constants::random_coin_counter_ptr mem_store
@@ -382,18 +380,71 @@ fn folding_reseed_helper_matches_reference_sampler() {
         )
     }
 
-    let (reference, _) = build_test!(&source(false), &[])
-        .execute_for_output()
-        .expect("reference sampler should execute");
-    let (combined, _) = build_test!(&source(true), &[])
-        .execute_for_output()
-        .expect("combined sampler should execute");
+    for pow_bits in [0, 1] {
+        let (reference, _) = build_test!(&source(false, pow_bits), &[])
+            .execute_for_output()
+            .unwrap_or_else(|err| {
+                panic!("reference sampler should execute with pow_bits={pow_bits}: {err:?}")
+            });
+        let (combined, _) = build_test!(&source(true, pow_bits), &[])
+            .execute_for_output()
+            .unwrap_or_else(|err| {
+                panic!("combined sampler should execute with pow_bits={pow_bits}: {err:?}")
+            });
 
-    assert_eq!(
-        combined.stack.get_num_elements(15),
-        reference.stack.get_num_elements(15),
-        "combined FRI reseed helper diverged from reference sampler"
+        assert_eq!(
+            combined.stack.get_num_elements(15),
+            reference.stack.get_num_elements(15),
+            "combined FRI reseed helper diverged from reference sampler with pow_bits={pow_bits}"
+        );
+    }
+}
+
+#[test]
+fn folding_reseed_rejects_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.1 exec.constants::set_folding_pow_bits
+            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.41.31.29.23 push.0
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(
+        test,
+        "reseed_with_folding_pow_and_ext: buffer must be empty"
     );
+}
+
+#[test]
+fn zero_pow_folding_reseed_accepts_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.0 exec.constants::set_folding_pow_bits
+            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.41.31.29.23 push.0
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+            drop drop
+        end
+        ";
+
+    build_test!(source, &[])
+        .execute()
+        .expect("zero-PoW reseed should flush a partial buffer");
 }
 
 #[test]
@@ -1277,6 +1328,7 @@ fn eidos_absorb_block_matches_rust_challenger() {
         begin
             push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le
             dropw
+            exec.random_coin::eidos_clear_buffer
             push.8.7.6.5
             push.4.3.2.1
             exec.random_coin::eidos_absorb_block
@@ -1309,6 +1361,27 @@ fn eidos_absorb_block_matches_rust_challenger() {
     let expected_word = challenger.squeeze_word();
 
     assert_eq!(Word::new(read_word(&output, SQUEEZED_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_absorb_block_rejects_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.8.7.6.5
+            push.4.3.2.1
+            exec.random_coin::eidos_absorb_block
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(test, "eidos_absorb_block: buffer must be empty");
 }
 
 #[test]

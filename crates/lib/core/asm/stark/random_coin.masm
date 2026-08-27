@@ -2,6 +2,8 @@
 #!
 #! The `eidos_*` procedures implement the Eidos challenger. Unprefixed sampling and observe
 #! helpers are recursive-verifier entry points over that state machine.
+#! The `eidos_absorb_*` block helpers require an empty absorb buffer. Use `eidos_observe_*` to
+#! append to buffered input.
 #!
 #! Eidos challenger memory layout:
 #!   random_coin_cv_ptr          - 4-felt chaining value
@@ -65,9 +67,14 @@ end
 
 #! Absorb a fully specified 8-felt Eidos block.
 #!
+#! The absorb buffer must be empty.
+#!
 #! Input: [block_lo, block_hi, ...]
 #! Output: [...]
 pub proc eidos_absorb_block
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    assertz.err="eidos_absorb_block: buffer must be empty"
+
     padw exec.constants::random_coin_cv_ptr mem_loadw_le
     swapw.2
     swapw
@@ -532,6 +539,7 @@ end
 #!
 #! For nonzero folding PoW this specializes the sequence:
 #! `reseed_with_felt; sample_folding_pow_and_ext`.
+#! The absorb buffer must be empty when the folding PoW bit count is nonzero.
 #!
 #! Input: [pow_witness, commitment, ...]
 #! Output: [alpha0, alpha1, ...]
@@ -539,6 +547,8 @@ pub proc reseed_with_folding_pow_and_ext
     exec.constants::get_folding_pow_bits
     dup push.0 neq
     if.true
+        exec.constants::random_coin_buffer_len_ptr mem_load
+        assertz.err="reseed_with_folding_pow_and_ext: buffer must be empty"
         exec.eidos_enter_absorbing
 
         # Build the absorbed block `[commitment, pow_witness, 0, 0, 0]`, keeping pow_bits below it.

@@ -259,7 +259,7 @@ _Insert into Advice Map:_
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
-| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
+| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`; `d` must fit in 31 bits. |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
 | `adv.insert_compress` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `K ← Eidos::compress(CV, BLOCK_LO \|\| BLOCK_HI)`. `advice_map[K] ← [BLOCK_LO, BLOCK_HI]`. |
 

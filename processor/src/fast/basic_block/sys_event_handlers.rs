@@ -21,6 +21,9 @@ use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::Fast
 /// Offset accounts for the event ID at position 0 on the stack.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
 
+/// The largest domain supported by Eidos. The high bit is reserved for the input mode.
+const MAX_EIDOS_DOMAIN: u64 = (1 << 31) - 1;
+
 // SYSTEM EVENT ERROR
 // ================================================================================================
 
@@ -149,6 +152,10 @@ fn insert_hdword_into_adv_map(
     processor: &mut FastProcessor,
     domain: Felt,
 ) -> Result<(), SystemEventError> {
+    if domain.as_canonical_u64() > MAX_EIDOS_DOMAIN {
+        return Err(OperationError::EidosDomainOutOfRange { domain }.into());
+    }
+
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
@@ -547,6 +554,7 @@ mod tests {
     use alloc::vec;
 
     use miden_core::{Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore};
+    use miden_utils_testing::build_test;
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
@@ -602,6 +610,41 @@ mod tests {
             err,
             SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
                 if current == base && actual == added && max == base + added - 1
+        ));
+    }
+
+    #[test]
+    fn insert_hdword_with_domain_event_accepts_max_eidos_domain() {
+        let mut stack_values: Vec<u64> = (1..=8).collect();
+        stack_values.push(MAX_EIDOS_DOMAIN);
+        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN);
+
+        let (output, _) = build_test!("begin adv.insert_hdword_d end", &stack_values)
+            .execute_for_output()
+            .unwrap();
+
+        let a = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(1 + idx as u64)));
+        let b = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(5 + idx as u64)));
+        let key = VmHasher::merge_in_domain(&[a, b], domain);
+        let stored_values = output
+            .advice
+            .get_mapped_values(&key)
+            .expect("valid Eidos domain should insert the double word");
+        assert_eq!(stored_values, &(1..=8).map(Felt::new_unchecked).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn insert_hdword_with_domain_event_rejects_oversized_eidos_domain() {
+        let mut stack_values = vec![ZERO];
+        stack_values.extend((1..=8).map(Felt::new_unchecked));
+        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN + 1);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
+
+        let err = insert_hdword_into_adv_map(&mut processor, domain).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::Operation(OperationError::EidosDomainOutOfRange { domain: actual })
+                if actual == domain
         ));
     }
 

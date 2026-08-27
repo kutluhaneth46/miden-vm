@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    CHIPLETS_WIDTH,
+    CHIPLETS_CLK_COL, CHIPLETS_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH,
         ace::ACE_CHIPLET_NUM_COLS,
@@ -22,6 +22,14 @@ use crate::{
 mod bitwise;
 use bitwise::AEAD_STREAM_FRAGMENT_WIDTH;
 pub(crate) use bitwise::{AEAD_STREAM_CYCLE_LEN, Bitwise};
+
+const BITWISE_COL_START: usize = 2;
+const BITWISE_FRAGMENT_WIDTH: usize = if BITWISE_WIDTH > AEAD_STREAM_FRAGMENT_WIDTH {
+    BITWISE_WIDTH
+} else {
+    AEAD_STREAM_FRAGMENT_WIDTH
+};
+const _: () = assert!(BITWISE_COL_START + BITWISE_FRAGMENT_WIDTH == CHIPLETS_CLK_COL);
 
 mod hasher;
 pub(crate) use hasher::Hasher;
@@ -271,12 +279,11 @@ impl Chiplets {
 
         let mut hasher_fragment =
             ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
-        let bitwise_width = BITWISE_WIDTH.max(AEAD_STREAM_FRAGMENT_WIDTH);
         let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
             bitwise_band,
             W,
-            2,
-            bitwise_width,
+            BITWISE_COL_START,
+            BITWISE_FRAGMENT_WIDTH,
             hasher_len,
             &[],
         );

@@ -346,7 +346,7 @@ When the VM executes a `DYNCALL` operation, it does the following:
 
 1. Adds a tuple `(blk, p_addr, 0, ctx, b_0, b_1, fn_hash[0..3])` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
-3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
 5. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
 6. Performs a stack left shift
@@ -448,7 +448,7 @@ When the VM executes a `CALL` operation, it does the following:
 
 1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
 2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
-3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
 #### SYSCALL operation
 
