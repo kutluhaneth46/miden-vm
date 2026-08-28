@@ -109,7 +109,6 @@ miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.31"
 miden-processor         = { path = "./processor", version = "0.31", default-features = false }
 miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "0.31", default-features = false }
 miden-event-handler-macros = { path = "./crates/event-handler-macros", version = "0.31", default-features = false }
-miden-event-handler-sdk = { path = "./crates/event-handler-sdk", version = "0.31", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "0.31", default-features = false }
 miden-prover            = { path = "./prover", version = "0.31", default-features = false }
@@ -124,7 +123,6 @@ miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.31", 
 miden-utils-sync        = { path = "./crates/utils-sync", version = "0.31", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
 miden-verifier          = { path = "./verifier", version = "0.31", default-features = false }
-miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "0.31", default-features = false }
 
 # Miden crates
 miden-formatting = { version = "0.1", default-features = false }

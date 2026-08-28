@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-abi"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-core",
  "miden-field",
@@ -2373,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-macros"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-event-handler-abi",
  "miden-mast-package",
@@ -2383,7 +2383,7 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-sdk"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-event-handler-abi",
  "miden-event-handler-macros",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "miden-wasm-event-handlers"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "criterion",
  "miden-assembly",
@@ -2876,7 +2876,7 @@ dependencies = [
 
 [[package]]
 name = "miden-wasm-event-handlers-project"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-assembly",
  "miden-mast-package",
