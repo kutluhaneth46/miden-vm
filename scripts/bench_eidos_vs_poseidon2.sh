@@ -10,6 +10,9 @@ MODE=""
 # Keep the historical #3306/#3307 comparison default; override it for the host with --threads.
 THREADS="${RAYON_NUM_THREADS:-16}"
 THREADS_EXPLICIT=0
+MVM_COUNTS_RAW=""
+WARMUPS_OVERRIDE=""
+REPEATS_OVERRIDE=""
 CPU_PROFILE="native"
 DRY_RUN=0
 CPU_POOL=()
@@ -48,6 +51,10 @@ Usage:
          intentionally retains them for larger machines.
 
 --threads N            Rayon/build threads. Default: 16, matching #3306/#3307.
+--mvm-counts LIST      Benchmark both hashes at these MVM counts, e.g. 4,5.
+                       Supported by smoke, headline, and full modes.
+--warmups N            Override the mode's number of warmup runs.
+--repeats N            Override the mode's number of measured runs.
 --cpu-profile PROFILE  Rust target CPU: native, x86-64-v3, or x86-64-v4.
                        Default: native.
 --dry-run              Validate a scaling host and print its placement without
@@ -76,6 +83,21 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || die "--threads requires a value"
       THREADS="$2"
       THREADS_EXPLICIT=1
+      shift 2
+      ;;
+    --mvm-counts)
+      (( $# >= 2 )) || die "--mvm-counts requires a comma-separated list"
+      MVM_COUNTS_RAW="$2"
+      shift 2
+      ;;
+    --warmups)
+      (( $# >= 2 )) || die "--warmups requires a value"
+      WARMUPS_OVERRIDE="$2"
+      shift 2
+      ;;
+    --repeats)
+      (( $# >= 2 )) || die "--repeats requires a value"
+      REPEATS_OVERRIDE="$2"
       shift 2
       ;;
     --cpu-profile)
@@ -107,6 +129,22 @@ done
   die "select --smoke, --headline, --scaling, or --full"
 }
 [[ "$THREADS" =~ ^[1-9][0-9]*$ ]] || die "--threads must be a positive integer"
+[[ -z "$WARMUPS_OVERRIDE" || "$WARMUPS_OVERRIDE" =~ ^[0-9]+$ ]] ||
+  die "--warmups must be a non-negative integer"
+[[ -z "$REPEATS_OVERRIDE" || "$REPEATS_OVERRIDE" =~ ^[1-9][0-9]*$ ]] ||
+  die "--repeats must be a positive integer"
+MVM_COUNTS=()
+if [[ -n "$MVM_COUNTS_RAW" ]]; then
+  [[ "$MODE" != "scaling" ]] || die "--mvm-counts cannot be combined with --scaling"
+  [[ "$MVM_COUNTS_RAW" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] ||
+    die "--mvm-counts must be a comma-separated list of positive integers"
+  IFS=, read -r -a MVM_COUNTS <<< "$MVM_COUNTS_RAW"
+  seen_counts=,
+  for count in "${MVM_COUNTS[@]}"; do
+    [[ "$seen_counts" != *",$count,"* ]] || die "duplicate MVM count: $count"
+    seen_counts+="$count,"
+  done
+fi
 case "$CPU_PROFILE" in
   native|x86-64-v3|x86-64-v4) ;;
   *) die "--cpu-profile must be native, x86-64-v3, or x86-64-v4" ;;
@@ -226,6 +264,9 @@ case "$MODE" in
     )
     ;;
 esac
+
+[[ -z "$WARMUPS_OVERRIDE" ]] || WARMUPS="$WARMUPS_OVERRIDE"
+[[ -z "$REPEATS_OVERRIDE" ]] || REPEATS="$REPEATS_OVERRIDE"
 
 if [[ "$MODE" == "scaling" ]]; then
   THREAD_PLAN=(8 16 32 64 64 32 16 8)
@@ -710,6 +751,7 @@ done
   echo "build_jobs=$BUILD_JOBS"
   echo "warmups=$WARMUPS"
   echo "repeats=$REPEATS"
+  echo "mvm_counts=${MVM_COUNTS_RAW:-mode-default}"
   echo "recursive_auth=$RECURSIVE_AUTH"
   echo "cpu_profile=$CPU_PROFILE"
   echo "cpu_profile_key=$CPU_PROFILE_KEY"
@@ -868,14 +910,17 @@ run_headline_arm() {
 REQUIRE_CACHE_HITS=0
 if [[ "$MODE" == "full" ]]; then
   echo "[full] recursive cases run in separate processes to release each proving setup"
+  if ((${#MVM_COUNTS[@]} == 0)); then
+    MVM_COUNTS=(3 4 5 6 7 8 9)
+  fi
   for index in "${!RECURSIVE_FILES[@]}"; do
     auth="${RECURSIVE_LABELS[$index]}"
     fixture="${RECURSIVE_FILES[$index]}"
-    for count in 3 4 5 6 7 8 9; do
+    for count in "${MVM_COUNTS[@]}"; do
       run_recursive poseidon2 "$P2_ROOT" "$auth" "$count" "$FIXTURE_ROOT/$fixture" \
         "$DEFAULT_THREADS" "$DEFAULT_CPU_LIST" ""
     done
-    for count in 3 4 5 6 7 8 9; do
+    for count in "${MVM_COUNTS[@]}"; do
       run_recursive eidos "$EIDOS_ROOT" "$auth" "$count" "$EIDOS_FIXTURES/$fixture" \
         "$DEFAULT_THREADS" "$DEFAULT_CPU_LIST" ""
     done
@@ -899,6 +944,14 @@ elif [[ "$MODE" == "scaling" ]]; then
       run_headline_arm eidos "$threads" "$cpu_list" "$block"
       run_headline_arm poseidon2 "$threads" "$cpu_list" "$block"
     fi
+  done
+elif ((${#MVM_COUNTS[@]} > 0)); then
+  fixture="${RECURSIVE_FILES[0]}"
+  for count in "${MVM_COUNTS[@]}"; do
+    run_recursive poseidon2 "$P2_ROOT" ecdsa "$count" "$FIXTURE_ROOT/$fixture" \
+      "$THREADS" "" ""
+    run_recursive eidos "$EIDOS_ROOT" ecdsa "$count" "$EIDOS_FIXTURES/$fixture" \
+      "$THREADS" "" ""
   done
 else
   run_headline_arm poseidon2 "$THREADS" "" ""
