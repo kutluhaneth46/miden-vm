@@ -24,18 +24,24 @@
 
 #### Changes
 
-- [BREAKING] Replaced the VM-native Poseidon2 permutation with Eidos, using one 32-row Eidos compression cycle per native hash-controller row. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and recursive-verifier commitments and digests are not compatible with earlier releases. The optional Poseidon2 STARK proof-hash configuration remains supported.
-- [BREAKING] Replaced `HPERM` with `COMPRESS`, re-specified `CRYPTOSTREAM` and `LOG_DEFERRED`
-  for the Eidos-native protocol, renamed `adv.insert_hperm` to `adv.insert_compress`, renamed
-  Falcon-Poseidon2 APIs to Falcon-Eidos, and replaced the legacy AEAD library with
-  `aead_eidos`. MAST serialization is now version 5 so forests containing the former opcode
-  encoding are rejected instead of being reinterpreted.
-- [BREAKING] Changed `LOG_DEFERRED` to replace a top-of-stack statement with the updated deferred root.
-- [BREAKING] Aligned `aead_ref` with `CRYPTOSTREAM`'s eight-Felt XOF blocks; `aead_eidos::decrypt_empty_ad` now emits `miden::core::crypto::aead_eidos::decrypt_empty_ad`, whose plaintext-witness handler is included in `CoreLibrary::handlers()`; public Eidos AEAD procedures now reject invalid or overlapping memory ranges and counter overflow.
-- [BREAKING] Changed the Miden proof statement from three AIRs to four: Core, Chiplets, the
-  standalone Eidos compression AIR, and the fixed And8 lookup AIR. The former range-checker AIR
-  was removed; 16-bit range checks now use the fixed byte-pair table in the And8 AIR. The
-  precompile VM remains a ten-AIR statement and now uses its own 32-row Eidos compression AIR.
+- [BREAKING] Replaced the VM-native Poseidon2 permutation and sponge-oriented hash interfaces with
+  Eidos compression chaining. Each native hash-controller row now uses one 32-row Eidos compression
+  cycle. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and
+  recursive-verifier commitments and digests are incompatible with earlier releases; the optional
+  Poseidon2 STARK proof-hash configuration remains supported. `HPERM` is now `COMPRESS`,
+  `adv.insert_hperm` is now `adv.insert_compress`, Falcon-Poseidon2 APIs are now Falcon-Eidos, and
+  MAST serialization uses wire version 0.0.5 so forests containing the former opcode encoding are
+  rejected. Raw `LOG_DEFERRED` now replaces a top-of-stack statement with the updated deferred root.
+  The low-level MASM hash API uses `init(n)` for domain zero, `init_in_domain(n, domain)` for a
+  tagged chain, or `init_with_chaining_word(CV)` for a protocol-defined CV; `copy_digest`,
+  `prepare_hasher_state(ptr, n, pad_inputs_flag)`, and `hash_elements_with_state` retain their
+  streaming and checkpoint roles. The legacy AEAD library is replaced by `aead_eidos`;
+  `CRYPTOSTREAM` and `aead_ref` use eight-Felt XOF blocks, `aead_eidos::decrypt_empty_ad` emits
+  `miden::core::crypto::aead_eidos::decrypt_empty_ad`, and public Eidos AEAD procedures reject
+  invalid or overlapping memory ranges and counter overflow. The Miden proof statement now has four
+  AIRs: Core, Chiplets, standalone Eidos compression, and the fixed And8 lookup. And8 supplies the
+  byte-pair table used by the compression constraints and the 16-bit range-check relation. The
+  precompile VM remains a ten-AIR statement and uses its own 32-row Eidos compression AIR.
 - Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
