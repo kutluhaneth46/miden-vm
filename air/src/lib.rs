@@ -31,6 +31,7 @@ mod constraints;
 pub mod lookup;
 pub mod memory;
 mod proof_order;
+pub mod security;
 pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
@@ -99,8 +100,8 @@ mod export {
     pub use miden_crypto::stark::{
         StarkConfig,
         air::{
-            AirBuilder, BaseAir, ConstraintDegrees, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-            MultiAir, PermutationAirBuilder, ProverStatement, Statement,
+            AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
+            LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
         },
         debug,
         pcs::PcsParams,
@@ -697,6 +698,19 @@ impl MidenAir {
         }
     }
 
+    /// Lookup fractions emitted per row, one entry per auxiliary lookup column.
+    ///
+    /// Available without naming a lookup builder, so callers that only need the shape — such as
+    /// the security estimator — do not have to pick an unrelated builder type to read it.
+    pub fn column_shape(self) -> &'static [usize] {
+        match self {
+            Self::Core => CoreAir.lookup_column_shape(),
+            Self::Chiplets => ChipletsAir.lookup_column_shape(),
+            Self::EidosCompression => EidosCompressionAir.lookup_column_shape(),
+            Self::And8Lookup => And8LookupAir.lookup_column_shape(),
+        }
+    }
+
     pub const fn file_token(self) -> &'static str {
         match self {
             Self::Core => "core",
@@ -930,12 +944,7 @@ where
     }
 
     fn column_shape(&self) -> &[usize] {
-        match self {
-            Self::Core => CoreAir.lookup_column_shape(),
-            Self::Chiplets => ChipletsAir.lookup_column_shape(),
-            Self::EidosCompression => EidosCompressionAir.lookup_column_shape(),
-            Self::And8Lookup => And8LookupAir.lookup_column_shape(),
-        }
+        MidenAir::column_shape(*self)
     }
 
     fn max_message_width(&self) -> usize {

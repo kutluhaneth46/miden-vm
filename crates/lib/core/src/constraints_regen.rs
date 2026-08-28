@@ -73,6 +73,7 @@ fn check() -> Result<(), String> {
     relation_digest_matches_artifact(&artifact)?;
     public_inputs_masm_matches_air()?;
     vm_geometry_matches_artifact(&artifact)?;
+    security_masm_matches_air()?;
     Ok(())
 }
 
@@ -861,6 +862,46 @@ fn vm_geometry_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), Stri
             return Err(format!("{path} has stale AIR-width geometry"));
         }
     }
+
+    Ok(())
+}
+
+/// Verify that the conjectured round-budget literals in `sys/vm/mod.masm` match the values
+/// `miden_air::security` derives from the current AIR set.
+///
+/// The exhaustive cross-test in `crates/lib/core/tests/sys` only exercises whichever round binds
+/// under the deployed shape (lookup and query); a stale composition, out-of-domain, DEEP, or
+/// folding literal moves no output in that sweep. Reading the literals straight out of the
+/// checked-in source is what actually catches that drift.
+pub fn security_masm_matches_air() -> Result<(), String> {
+    let masm = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
+
+    let literals: [(&str, u64); 10] = [
+        ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
+        ("SECURITY_CAP_FP", miden_air::security::SECURITY_CAP),
+        ("LOOKUP_BASE_FP", miden_air::security::LOOKUP_BASE),
+        ("COMPOSITION_TERM_FP", miden_air::security::COMPOSITION_TERM),
+        ("OOD_BASE_FP", miden_air::security::OOD_BASE),
+        ("DEEP_BASE_FP", miden_air::security::DEEP_BASE),
+        ("FOLDING_BASE_FP", miden_air::security::FOLDING_BASE),
+        ("LOG2_E_FP", miden_air::security::LOG2_E),
+        (
+            "CORE_BOUNDARY_LOOKUP_TERMS",
+            miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
+        ),
+        (
+            "LOOKUP_FRACTIONS_PER_ROW",
+            miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
+        ),
+    ];
+
+    for (name, expected) in literals {
+        let actual = parse_masm_const::<u64>(&masm, name, "sys/vm/mod.masm")?;
+        if actual != expected {
+            return Err(format!("{name} in sys/vm/mod.masm is stale"));
+        }
+    }
+
     Ok(())
 }
 
@@ -874,7 +915,11 @@ where
 {
     let prefix = format!("const {name} = ");
     masm.lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix).and_then(|v| v.parse::<T>().ok()))
+        .find_map(|line| {
+            let value = line.trim().strip_prefix(&prefix)?;
+            let value = value.split('#').next().unwrap_or(value).trim();
+            value.parse::<T>().ok()
+        })
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
 }
 

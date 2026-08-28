@@ -41,7 +41,6 @@ ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
-FAST_TEST_FEATURES       := concurrent,testing
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
@@ -214,8 +213,9 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 
 .PHONY: test-fast
 test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
-		FEATURES="$(FAST_TEST_FEATURES)" \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
 		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
 
 .PHONY: test-skip-proptests
@@ -265,6 +265,27 @@ test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WA
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
+
+# wasm32-wasip1 refuses to spawn at runtime, so this runs the compact fallback for real. Only the
+# span test is skipped -- it asserts a Rayon worker ran, which cannot hold where threads are
+# unavailable -- so equality tests added later are covered here without touching this target. A
+# passing run is not enough to trust: libtest exits 0 when a filter selects nothing, so a zero-test
+# run would otherwise leave this green while guarding nothing.
+.PHONY: test-wasm-threadless
+test-wasm-threadless: ## Runs the overlapped trace-build tests on a threadless wasm target (requires wasmtime)
+	@dir=$$(mktemp -d) || exit 1; \
+	trap 'rm -rf "$$dir"' EXIT INT TERM; \
+	{ CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+		cargo test -p miden-processor --test streamed_hasher --target wasm32-wasip1 \
+		-- --skip overlap_builder_thread_enters_the_instrument_span 2>&1; \
+	  echo $$? >"$$dir/status"; } | tee "$$dir/log"; \
+	status=$$(cat "$$dir/status" 2>/dev/null); \
+	case "$$status" in ''|*[!0-9]*) status=1;; esac; \
+	if [ "$$status" -eq 0 ] && ! grep -q "^test result: ok\. [1-9][0-9]* passed" "$$dir/log"; then \
+		echo "no test passed on the threadless target; the filter selected nothing, or everything it selected was ignored" >&2; \
+		status=1; \
+	fi; \
+	exit "$$status"
 
 .PHONY: check-fuzz
 check-fuzz: ## Checks standalone fuzz workspaces
