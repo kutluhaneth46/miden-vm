@@ -125,6 +125,46 @@ fn core_library_exports_crypto_wrappers() {
 }
 
 #[test]
+fn core_library_exports_eidos_streaming_api() {
+    use miden_core_lib::CoreLibrary;
+
+    let core_lib = CoreLibrary::default();
+    let package = core_lib.package();
+    let module = "::miden::core::crypto::hashes::eidos";
+
+    for procedure in [
+        "init_chaining_word",
+        "init_chaining_word_in_domain",
+        "init_with_chaining_word",
+        "init",
+        "init_in_domain",
+        "compress",
+        "digest",
+        "copy_digest",
+        "absorb_double_words_from_memory",
+        "prepare_hasher_state",
+        "hash_elements_with_state",
+        "hash_elements",
+        "hash_elements_in_domain",
+        "pad_and_hash_elements",
+    ] {
+        let path = format!("{module}::{procedure}");
+        assert!(
+            package.get_procedure_root_by_path(path.as_str()).is_some(),
+            "{path} must be exported by corelib",
+        );
+    }
+
+    for procedure in ["init_no_padding", "hash_elements_with_domain"] {
+        let path = format!("{module}::{procedure}");
+        assert!(
+            package.get_procedure_root_by_path(path.as_str()).is_none(),
+            "{path} must not be exported by corelib",
+        );
+    }
+}
+
+#[test]
 fn core_packages_do_not_block_sibling_miden_namespaces() {
     use std::sync::Arc;
 

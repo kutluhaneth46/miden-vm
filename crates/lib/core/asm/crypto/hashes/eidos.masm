@@ -11,20 +11,23 @@ const EIDOS_INIT_CV_2 = 1947077364412317696
 const EIDOS_INIT_CV_3_BASE = 6620516959492505600
 
 #! Constructs `Eidos::init_chaining_word(0, n)`.
+#! `n` must fit in a u32.
 #!
 #! Input:  [n, ...]
 #! Output: [CV, ...]
 pub proc init_chaining_word
+    u32assert.err="num_elements must fit in a u32"
     push.EIDOS_INIT_CV_3_BASE add
     push.EIDOS_INIT_CV_2.EIDOS_INIT_CV_1.EIDOS_INIT_CV_0
 end
 
 #! Constructs `Eidos::init_chaining_word(domain, n)`.
+#! `n` must fit in a u32, and `domain` must be below `2^31`.
 #!
 #! Input:  [n, domain, ...]
 #! Output: [CV, ...]
-#! Fails if `domain` does not fit in 31 bits.
 pub proc init_chaining_word_in_domain
+    u32assert.err="num_elements must fit in a u32"
     dup.1 push.2147483648 u32lt assert.err="domain must fit in 31 bits"
 
     push.EIDOS_INIT_CV_3_BASE add
@@ -35,6 +38,36 @@ pub proc init_chaining_word_in_domain
 
     push.EIDOS_INIT_CV_1.EIDOS_INIT_CV_0
     # => [CV, ...]
+end
+
+#! Adds two zero block words above a caller-supplied chaining word.
+#!
+#! Input:  [CV, ...]
+#! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]
+pub proc init_with_chaining_word
+    padw padw
+end
+
+#! Initializes a three-word state for a message of `num_elements` Felts in domain zero.
+#! `num_elements` must fit in a u32.
+#! An empty message still requires one zero-block compression after initialization.
+#!
+#! Input:  [num_elements, ...]
+#! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]
+pub proc init
+    exec.init_chaining_word
+    exec.init_with_chaining_word
+end
+
+#! Initializes a three-word state for a message of `num_elements` Felts in the given domain.
+#! `num_elements` must fit in a u32, and `domain` must be below `2^31`.
+#! An empty message still requires one zero-block compression after initialization.
+#!
+#! Input:  [num_elements, domain, ...]
+#! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]
+pub proc init_in_domain
+    exec.init_chaining_word_in_domain
+    exec.init_with_chaining_word
 end
 
 #! Performs one Eidos compression.
@@ -54,20 +87,6 @@ end
 pub proc digest
     dropw
     dropw
-end
-
-#! Prepares a raw all-zero three-word compression state.
-#!
-#! This is not a canonical Eidos hash initializer: it does not bind a message length or domain.
-#! It is only suitable for protocols which define and manage their own raw compression state.
-#!
-#! Input: []
-#! Output: [BLOCK_LO, BLOCK_HI, CV, ...]
-#!
-#! Where BLOCK_LO, BLOCK_HI, and CV are three zero words (BLOCK_LO on top of stack).
-#!
-pub proc init_no_padding
-    padw padw padw
 end
 
 #! Copies the current chaining word to the top of the stack.
@@ -109,11 +128,10 @@ pub proc absorb_double_words_from_memory
     end
 end
 
-#! Hashes an aligned range of double words.
+#! Hashes a memory range containing zero or more complete 8-Felt blocks.
 #!
-#! The range is committed using the same Eidos framing as `hash_words`: the input length is bound
-#! into the initial chaining word. This helper is kept for callers whose data is naturally stored
-#! as 8-Felt records.
+#! The range length must be a multiple of 8. The input length is bound into the initial chaining
+#! word.
 #!
 #! Input: [start_addr, end_addr, ...]
 #! Output: [HASH, ...]
@@ -121,6 +139,10 @@ pub proc hash_double_words
     # enforce `start_addr <= end_addr`
     dup.1 dup.1 u32assert2
     u32gte assert.err="start address should be less or equal to the end address"
+    # => [start_addr, end_addr, ...]
+
+    dup.1 dup.1 sub u32mod.8
+    assertz.err="range length must be a multiple of 8"
     # => [start_addr, end_addr, ...]
 
     exec.hash_words
@@ -147,7 +169,7 @@ pub proc hash_words_with_domain
     movup.2 drop swap
     # => [start_addr, num_elements, domain, ...]
 
-    exec.hash_elements_with_domain
+    exec.hash_elements_in_domain
 end
 
 #! Hashes the word-aligned memory range `[start_addr, end_addr)`.
@@ -167,21 +189,11 @@ pub proc hash_words
     exec.hash_words_with_domain
 end
 
-#! Initializes the hasher state required for the `hash_elements_with_state` procedure.
+#! Prepares a domain-tagged state for `hash_elements_with_state`.
 #!
-#! Inputs:  [ptr, num_elements, domain]
-#! Outputs: [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
-#!
-#! Where:
-#! - ptr is the memory address of the first element to be hashed. This address must be
-#!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed and must fit in a u32.
-#! - domain is the domain identifier mixed into the initial chaining word.
-#! - BLOCK_LO and BLOCK_HI are block words, and CV is the length/domain-bound chaining word.
-#! - end_pairs_addr is the memory address at which the pairs of words end.
-#! - num_elements%8 is the number of elements that did not fit into word pairs and should be
-#!   hashed separately.
-pub proc prepare_hasher_state
+#! Input:  [ptr, num_elements, domain, ...]
+#! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_pairs_addr, num_elements%8, ...]
+proc prepare_hasher_state_in_domain
     # move number of inputs to the top of the stack
     swap
     # => [num_elements, ptr, domain]
@@ -207,6 +219,15 @@ pub proc prepare_hasher_state
     # prepare the three-word VM hasher state
     padw padw
     # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
+
+    # Eidos represents the empty message by compressing one zero block. Do that during preparation
+    # so that an empty continuation remains a no-op in `hash_elements_with_state`.
+    dup.14 eq.0
+    dup.13 dup.15 eq
+    and
+    if.true
+        exec.compress
+    end
 end
 
 proc prepare_padded_hasher_state
@@ -216,6 +237,8 @@ proc prepare_padded_hasher_state
 
     dup
     # => [num_elements, num_elements, ptr, padded_len]
+
+    u32assert.err="num_elements must fit in a u32"
 
     u32divmod.8
     swap
@@ -232,6 +255,49 @@ proc prepare_padded_hasher_state
 
     padw padw
     # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
+
+    dup.14 eq.0
+    dup.13 dup.15 eq
+    and
+    if.true
+        exec.compress
+    end
+end
+
+#! Initializes the state required by `hash_elements_with_state`.
+#!
+#! If `pad_inputs_flag` is zero, the initial chaining word binds `num_elements`. If the flag is
+#! one, it binds `ceil(num_elements / 8) * 8`. Unused lanes of the final block are replaced with
+#! zeros, so their memory contents are not committed.
+#!
+#! Input:  [ptr, num_elements, pad_inputs_flag, ...]
+#! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_pairs_addr, num_elements%8, ...]
+#!
+#! `ptr` must be word-aligned, `num_elements` must fit in a u32, and `pad_inputs_flag` must be zero
+#! or one. Padded-length overflow is rejected.
+#! For an empty input, the prepared CV already includes the required zero-block compression.
+pub proc prepare_hasher_state
+    movup.2
+    # => [pad_inputs_flag, ptr, num_elements]
+
+    dup dup sub.1 mul assertz.err="pad_inputs_flag must be 0 or 1"
+
+    if.true
+        # Bind the length of the zero-padded stream.
+        dup.1 u32assert.err="num_elements must fit in a u32"
+        u32overflowing_add.7
+        assertz.err="padded input length exceeds a u32"
+        u32div.8 mul.8 movdn.2
+        # => [ptr, num_elements, padded_len]
+
+        exec.prepare_padded_hasher_state
+    else
+        # Bind the logical input length in domain zero.
+        push.0 movdn.2
+        # => [ptr, num_elements, domain=0]
+
+        exec.prepare_hasher_state_in_domain
+    end
 end
 
 #! Computes hash of Felt values starting at the specified memory address using the provided hasher
@@ -240,6 +306,7 @@ end
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
 #! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
 #! procedure.
+#! An empty continuation returns the supplied chaining word unchanged.
 #!
 #! Inputs:  [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 #! Outputs: [HASH]
@@ -388,7 +455,7 @@ pub proc hash_elements_with_state
     end
 end
 
-#! Computes hash of Felt values starting at the specified memory address.
+#! Computes a domain-tagged hash of Felt values starting at the specified memory address.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
 #! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
@@ -404,40 +471,25 @@ end
 #! - domain is the domain identifier mixed into the initial chaining word.
 #! - HASH is the resulting hash of the provided memory values.
 #!
-pub proc hash_elements_with_domain
-    dup.1 eq.0
-    if.true
-        drop drop
-        # => [domain, ...]
+pub proc hash_elements_in_domain
+    exec.prepare_hasher_state_in_domain
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 
-        push.0 exec.init_chaining_word_in_domain
-        # => [CV, ...]
-
-        padw padw
-        compress
-        exec.digest
-    else
-        exec.prepare_hasher_state
-        # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
-
-        exec.hash_elements_with_state
-        # => [HASH]
-    end
+    exec.hash_elements_with_state
+    # => [HASH]
 end
 
+#! Hashes Felt values starting at the specified memory address in domain zero.
+#!
+#! Input:  [ptr, num_elements, ...]
+#! Output: [HASH, ...]
+#!
+#! `ptr` must be word-aligned, and `num_elements` must fit in a u32.
 pub proc hash_elements
     push.0 movdn.2
     # => [ptr, num_elements, domain=0]
 
-    exec.hash_elements_with_domain
-end
-
-#! Canonical public spelling for domain-tagged element hashing.
-#!
-#! Inputs: [ptr, num_elements, domain]
-#! Outputs: [HASH]
-pub proc hash_elements_in_domain
-    exec.hash_elements_with_domain
+    exec.hash_elements_in_domain
 end
 
 #! Hashes Felt values after padding the logical input length to a full 8-Felt block.
@@ -457,21 +509,13 @@ end
 #! - num_elements is the number of elements to be hashed and must fit in a u32.
 #! - HASH is the resulting hash of the provided memory values.
 pub proc pad_and_hash_elements
-    dup.1 u32assert.err="num_elements must fit in a u32" drop
-    dup.1 eq.0
-    if.true
-        # The padded stream is empty. Use the canonical empty-message path, which performs one
-        # zero-block compression under the length-zero chaining value.
-        exec.hash_elements
-    else
-        dup.1 add.7 u32divmod.8 drop mul.8 movdn.2
-        # => [ptr, num_elements, padded_len]
+    push.1 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag=1]
 
-        exec.prepare_padded_hasher_state
-        # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
+    exec.prepare_hasher_state
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 
-        exec.hash_elements_with_state
-    end
+    exec.hash_elements_with_state
 end
 
 #! Computes the VM-native hash of a single word (256-bit input).
@@ -507,7 +551,7 @@ end
 #!
 #! Where:
 #! - A and B are the words to be merged (A is the first block word).
-#! - C is `hash_elements_with_domain(A || B, domain)`.
+#! - C is `hash_elements_in_domain(A || B, domain)`.
 #!
 pub proc merge_in_domain
     movdn.8

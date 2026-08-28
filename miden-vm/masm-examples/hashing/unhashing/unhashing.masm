@@ -5,11 +5,12 @@
 # 2. Compress the native hash state.
 
 use miden::core::crypto::hashes::eidos
+use miden::core::sys
 
 begin
     # Reads 100 words from the advice provider, stores them in memory, and computes their hash.
     # Bind the full 400-Felt message length into the initial Eidos chaining value.
-    push.400 exec.eidos::init_chaining_word movdnw.2
+    push.400 exec.eidos::init
     # => [BLOCK_LO=ZERO_WORD, BLOCK_HI=ZERO_WORD, CV, addr=0]
 
     repeat.50
@@ -23,5 +24,6 @@ begin
 
     # Drop the memory address.
     movup.4 drop
+    exec.sys::truncate_stack
     # => [DIGEST]
 end

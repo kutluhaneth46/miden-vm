@@ -208,17 +208,17 @@ fn hash_precompile_cycle_baselines() {
         (
             "keccak_hash_1_chunk_mem",
             cycle_hash_mem_source("keccak256", "hash_1_chunk_mem", &input),
-            289,
+            271,
         ),
         (
             "keccak_hash_2_chunks_mem",
             cycle_hash_mem_source("keccak256", "hash_2_chunks_mem", &bytes64),
-            295,
+            277,
         ),
         (
             "keccak_hash_bytes_mem_short",
             cycle_hash_mem_source("keccak256", "hash_bytes_mem", short),
-            292,
+            274,
         ),
     ] {
         let output =

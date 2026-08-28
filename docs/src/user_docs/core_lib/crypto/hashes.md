@@ -47,20 +47,34 @@ Module `miden::core::crypto::hashes::eidos` contains the VM-native Eidos hashing
 frames an input length and optional domain in an initial chaining word, then absorbs 8-field-element
 blocks with Eidos compression. A digest is one word (4 field elements).
 
+The total input length is fixed before the first compression. For a manual chain, use `init` for
+domain zero or `init_in_domain` for an explicit domain. These procedures only initialize the state;
+an empty message still requires one zero-block compression. The one-shot hashing procedures handle
+the empty and partial-block rules themselves.
+
 | Procedure | Description |
 | --------- | ----------- |
 | `init_chaining_word` | Constructs `Eidos::init_chaining_word(0, n)`.<br /><br />Input: `[n, ...]`<br />Output: `[CV, ...]` |
 | `init_chaining_word_in_domain` | Constructs `Eidos::init_chaining_word(domain, n)`.<br /><br />Input: `[n, domain, ...]`<br />Output: `[CV, ...]` |
+| `init_with_chaining_word` | Adds two zero block words above a caller-supplied chaining word.<br /><br />Input: `[CV, ...]`<br />Output: `[BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]` |
+| `init` | Initializes a three-word state for a known-length message in domain zero.<br /><br />Input: `[num_elements, ...]`<br />Output: `[BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]` |
+| `init_in_domain` | Initializes a three-word state for a known-length message in the given domain.<br /><br />Input: `[num_elements, domain, ...]`<br />Output: `[BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]` |
 | `compress` | Performs one Eidos compression and updates the chaining word.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[BLOCK_LO, BLOCK_HI, CV', ...]` |
 | `digest` | Drops the two block words and returns the current chaining word. The returned word is a final digest only after the framed Eidos schedule is complete.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[CV, ...]` |
+| `copy_digest` | Copies the current chaining word without consuming the live state.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ...]`<br />Output: `[CV_COPY, BLOCK_LO, BLOCK_HI, CV, ...]` |
+| `absorb_double_words_from_memory` | Continues a live chain over zero or more complete 8-Felt blocks. An empty range leaves the state unchanged.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, start_addr, end_addr, ...]`<br />Output: `[BLOCK_LO', BLOCK_HI', CV', end_addr, end_addr, ...]` |
+| `hash_double_words` | Hashes an aligned range of complete 8-Felt blocks. The range length must be a multiple of 8.<br /><br />Input: `[start_addr, end_addr, ...]`<br />Output: `[HASH, ...]` |
 | `hash_words_with_domain` | Hashes the word-aligned memory range `[start_addr, end_addr)` with a domain identifier. The input length is bound into the initial chaining word.<br /><br />Input: `[domain, start_addr, end_addr, ...]`<br />Output: `[H, ...]` |
 | `hash_words` | Equivalent to `hash_words_with_domain` with `domain = 0`.<br /><br />Input: `[start_addr, end_addr, ...]`<br />Output: `[H, ...]` |
-| `hash_elements_with_domain` | Hashes `num_elements` field elements from word-aligned memory and binds both their exact count and `domain`.<br /><br />Input: `[ptr, num_elements, domain, ...]`<br />Output: `[HASH, ...]` |
-| `hash_elements_in_domain` | Canonical public spelling for domain-tagged element hashing; equivalent to `hash_elements_with_domain`.<br /><br />Input: `[ptr, num_elements, domain, ...]`<br />Output: `[HASH, ...]` |
+| `prepare_hasher_state` | Prepares the state consumed by `hash_elements_with_state`. A zero padding flag binds `num_elements`; a one flag binds the length rounded up to a complete block and replaces unused final lanes with zeros. For empty input, the prepared CV already includes the required zero-block compression.<br /><br />Input: `[ptr, num_elements, pad_inputs_flag, ...]`<br />Output: `[BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8, ...]` |
+| `hash_elements_with_state` | Hashes a prepared memory range and returns its current chaining word. An empty continuation returns the supplied CV unchanged.<br /><br />Input: `[BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8, ...]`<br />Output: `[HASH, ...]` |
+| `hash_elements` | Hashes `num_elements` field elements from word-aligned memory in domain zero.<br /><br />Input: `[ptr, num_elements, ...]`<br />Output: `[HASH, ...]` |
+| `hash_elements_in_domain` | Hashes `num_elements` field elements from word-aligned memory and binds both their exact count and `domain`.<br /><br />Input: `[ptr, num_elements, domain, ...]`<br />Output: `[HASH, ...]` |
 | `pad_and_hash_elements` | Hashes after extending the logical input with zeros to the next 8-felt block. The padded length, rather than the unpadded length, is committed.<br /><br />Input: `[ptr, num_elements, ...]`<br />Output: `[HASH, ...]` |
 | `hash` | Computes the VM-native hash of one word.<br /><br />Input: `[A, ...]`<br />Output: `[B, ...]`<br />Cycles: 18 |
 | `merge` | Computes the VM-native two-to-one hash of two words.<br /><br />Input: `[A, B, ...]`<br />Output: `[C, ...]`<br />Cycles: 15 |
 | `merge_in_domain` | Merges two words under a domain identifier.<br /><br />Input: `[domain, A, B, ...]`<br />Output: `[C, ...]`<br />Cycles: 21 |
 
-The module also exposes lower-level state helpers for callers that deliberately manage aligned
-8-felt absorption. Prefer the exact-length and domain-tagged procedures for protocol commitments.
+Use `init_with_chaining_word` only when the surrounding protocol defines the supplied CV. For
+ordinary protocol commitments, prefer the length-bound initializers or the one-shot hashing
+procedures.
