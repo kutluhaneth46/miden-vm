@@ -519,7 +519,9 @@ fn fill_eidos_compression_trace(
         .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
             let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
             for (block_idx, (block_rows, (key, multiplicity))) in rows_chunk
-                .chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN)
+                .as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>()
+                .0
+                .iter_mut()
                 .zip(requests_chunk.iter())
                 .enumerate()
             {
@@ -566,7 +568,7 @@ fn fill_eidos_compression_trace(
             .enumerate()
             .for_each(|(chunk_idx, chunk)| {
                 for (block_idx, block_rows) in
-                    chunk.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
                 {
                     block_rows.copy_from_slice(&dummy_block);
                     let compression_cycle_id =
@@ -611,7 +613,9 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
         .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
             let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
             for (block_idx, (block_rows, state)) in rows_chunk
-                .chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN)
+                .as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>()
+                .0
+                .iter_mut()
                 .zip(requests_chunk)
                 .enumerate()
             {
@@ -659,7 +663,7 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
             .enumerate()
             .for_each(|(chunk_idx, chunk)| {
                 for (block_idx, block_rows) in
-                    chunk.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
                 {
                     block_rows.copy_from_slice(&dummy_block);
                     let compression_cycle_id =

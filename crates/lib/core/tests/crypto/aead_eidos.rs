@@ -1129,9 +1129,9 @@ fn stream_plaintext_felts(num_felts: usize) -> Vec<Felt> {
 
 fn store_felts(ptr: u64, values: &[Felt]) -> String {
     let mut stores = String::new();
-    let mut chunks = values.chunks_exact(4);
+    let (chunks, remainder) = values.as_chunks::<4>();
 
-    for (word_idx, word) in chunks.by_ref().enumerate() {
+    for (word_idx, word) in chunks.iter().enumerate() {
         let ptr = ptr + (word_idx as u64) * 4;
         stores.push_str(&format!(
             "
@@ -1144,7 +1144,7 @@ fn store_felts(ptr: u64, values: &[Felt]) -> String {
     }
 
     let tail_start = ptr + ((values.len() / 4) as u64) * 4;
-    for (offset, felt) in chunks.remainder().iter().enumerate() {
+    for (offset, felt) in remainder.iter().enumerate() {
         let value = felt.as_canonical_u64();
         let ptr = tail_start + offset as u64;
         stores.push_str(&format!(

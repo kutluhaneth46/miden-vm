@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{mem::size_of, ops::Range};
 
 use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
 use miden_core::{ONE, chiplets::eidos_compression, field::PrimeCharacteristicRing};
@@ -22,7 +22,7 @@ fn bitwise_init() {
 #[test]
 fn entry_does_not_inline_the_aead_stream_payload() {
     assert!(
-        core::mem::size_of::<super::Entry>() < core::mem::size_of::<super::AeadStreamOp>(),
+        size_of::<super::Entry>() < size_of::<super::AeadStreamOp>(),
         "ordinary bitwise entries must not pay for the inline AEAD stream payload",
     );
 }

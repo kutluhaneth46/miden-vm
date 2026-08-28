@@ -336,7 +336,10 @@ where
 }
 
 fn validate_packed_inputs(block: &[u32; 16], h: &[u32; 8]) {
-    for pair in block.as_slice().chunks_exact(2).chain(h.as_slice().chunks_exact(2)) {
+    let block_pairs = block.as_slice().as_chunks::<2>().0;
+    let h_pairs = h.as_slice().as_chunks::<2>().0;
+
+    for pair in block_pairs.iter().chain(h_pairs.iter()) {
         assert!(
             pair[1] != u32::MAX || pair[0] == 0,
             "packed Eidos compression input must be a canonical field element",

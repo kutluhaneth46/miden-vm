@@ -394,7 +394,7 @@ fn build_eidos_compression_traces(
     let mut counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
 
     for (physical_cycle_id, cycle_rows) in
-        rows.chunks_exact_mut(EIDOS_COMPRESSION_CYCLE_LEN).enumerate()
+        rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
     {
         let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
             let block = unpack_felts::<16>(&cycle.block);

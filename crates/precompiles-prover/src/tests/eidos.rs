@@ -126,7 +126,7 @@ fn narrow_balance(
 fn parent_matrix_from_core(trace: &RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
     let mut values =
         Vec::with_capacity(trace.values.len() / NUM_EIDOS_COMPRESSION_COLS * NUM_MAIN_COLS);
-    for row in trace.values.chunks_exact(NUM_EIDOS_COMPRESSION_COLS) {
+    for row in trace.values.as_chunks::<NUM_EIDOS_COMPRESSION_COLS>().0 {
         values.extend_from_slice(row);
         values.extend([Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS]);
     }

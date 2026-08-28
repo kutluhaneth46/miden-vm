@@ -9,7 +9,7 @@ fn raw_absorb_double_words(values: &[u64]) -> Vec<u64> {
     let mut cv = Word::default();
     let mut last_block = [Felt::ZERO; 8];
 
-    for chunk in values.chunks_exact(8) {
+    for chunk in values.as_chunks::<8>().0 {
         last_block = core::array::from_fn(|i| Felt::new_unchecked(chunk[i]));
         cv = Eidos::compress(cv, last_block);
     }

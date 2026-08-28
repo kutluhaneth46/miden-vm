@@ -1520,6 +1520,8 @@ impl StackOverflowReplay {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use core::mem::size_of;
+
     use super::*;
 
     #[test]
@@ -1541,8 +1543,7 @@ mod tests {
 
         assert_eq!(replay.trace_len(), Some(1 + 2 * AEAD_STREAM_CYCLE_LEN));
         assert!(
-            core::mem::size_of::<BitwiseReplayEntry>()
-                < core::mem::size_of::<AeadStreamReplayEntry>(),
+            size_of::<BitwiseReplayEntry>() < size_of::<AeadStreamReplayEntry>(),
             "ordinary replay entries must not pay for the inline AEAD stream payload",
         );
     }

@@ -85,7 +85,12 @@ fn tx_proof_cache_key(
         stack_bytes.extend_from_slice(&value.to_le_bytes());
     }
     let mut relation_digest_bytes = [0_u8; 32];
-    for (chunk, element) in relation_digest_bytes.chunks_exact_mut(8).zip(RELATION_DIGEST.iter()) {
+    for (chunk, element) in relation_digest_bytes
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip(RELATION_DIGEST.iter())
+    {
         chunk.copy_from_slice(&element.as_canonical_u64().to_le_bytes());
     }
     let hash_fn_byte = [hash_fn as u8];

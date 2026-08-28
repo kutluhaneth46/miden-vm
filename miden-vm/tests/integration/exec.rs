@@ -1,16 +1,14 @@
 use alloc::sync::Arc;
 use core::assert_matches;
-use std::path::PathBuf;
 
-use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
-use miden_core::{Felt, ONE, Word, advice::AdviceMap, program::Program};
-use miden_core_lib::CoreLibrary;
+use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
 use miden_processor::{
     ExecutionOptions, FastProcessor, StackInputs,
     advice::{AdviceError, AdviceInputs},
     mast::MastForest,
 };
-use miden_vm::{DefaultHost, internal::InputFile};
+use miden_vm::DefaultHost;
 
 #[test]
 fn advice_map_loaded_before_execution() {
@@ -71,8 +69,16 @@ fn advice_map_loaded_before_execution() {
     .unwrap();
 }
 
+#[cfg(feature = "internal")]
 #[test]
 fn canonical_deferred_ecdsa4_keccak100_example_executes() {
+    use std::path::PathBuf;
+
+    use miden_assembly::Linkage;
+    use miden_core::Felt;
+    use miden_core_lib::CoreLibrary;
+    use miden_vm::internal::InputFile;
+
     let program_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("masm-examples/precompiles/deferred_ecdsa4_keccak100")
         .join("deferred_ecdsa4_keccak100.masm");

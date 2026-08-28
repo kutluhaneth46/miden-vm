@@ -436,62 +436,6 @@ impl Deserializable for RangeCheckerReplay {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_round_trip<T>(value: T)
-    where
-        T: Serializable + Deserializable + PartialEq + core::fmt::Debug,
-    {
-        let restored = T::read_from_bytes(&value.to_bytes()).unwrap();
-        assert_eq!(restored, value);
-    }
-
-    #[test]
-    fn five_limb_range_check_replay_round_trips() {
-        assert_round_trip(RangeCheckReplayValues::Five([1, 2, 3, 4, 8]));
-    }
-
-    #[test]
-    fn eidos_bitwise_replay_variants_round_trip() {
-        let mut replay = BitwiseReplay::default();
-        replay.record_u32and(Felt::new_unchecked(1), Felt::new_unchecked(2));
-        replay.record_aead_stream(AeadStreamReplayEntry {
-            ctx: Felt::new_unchecked(3),
-            clk: Felt::new_unchecked(4),
-            src_ptr: Felt::new_unchecked(5),
-            dst_ptr: Felt::new_unchecked(6),
-            lane_base: Felt::new_unchecked(7),
-            plaintext: [Felt::new_unchecked(8); 4],
-            keystream: [Felt::new_unchecked(9); 8],
-            ciphertext: [Felt::new_unchecked(10); 8],
-        });
-        assert_round_trip(replay);
-    }
-
-    #[test]
-    fn eidos_hasher_replay_variants_round_trip() {
-        let compression = HasherOp::Compress([Felt::new_unchecked(11); STATE_WIDTH]);
-        assert_eq!(compression.to_bytes()[0], 0, "compression replay tag is wire-pinned");
-
-        for op in [
-            compression,
-            HasherOp::AeadXof(
-                ContextId::root(),
-                RowIndex::from(12u32),
-                [Felt::new_unchecked(13); STATE_WIDTH],
-            ),
-        ] {
-            assert_round_trip(op);
-        }
-
-        let mut replay = HasherResponseReplay::default();
-        replay.record_compression(Felt::new_unchecked(14), [Felt::new_unchecked(15); STATE_WIDTH]);
-        assert_round_trip(replay);
-    }
-}
-
 impl Serializable for BlockAddressReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.block_addresses.write_into(target);
@@ -673,5 +617,61 @@ impl Deserializable for ExecutionReplay {
             block_address: BlockAddressReplay::read_from(source)?,
             mast_forest_resolution: MastForestResolutionReplay::read_from(source)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_round_trip<T>(value: T)
+    where
+        T: Serializable + Deserializable + PartialEq + core::fmt::Debug,
+    {
+        let restored = T::read_from_bytes(&value.to_bytes()).unwrap();
+        assert_eq!(restored, value);
+    }
+
+    #[test]
+    fn five_limb_range_check_replay_round_trips() {
+        assert_round_trip(RangeCheckReplayValues::Five([1, 2, 3, 4, 8]));
+    }
+
+    #[test]
+    fn eidos_bitwise_replay_variants_round_trip() {
+        let mut replay = BitwiseReplay::default();
+        replay.record_u32and(Felt::new_unchecked(1), Felt::new_unchecked(2));
+        replay.record_aead_stream(AeadStreamReplayEntry {
+            ctx: Felt::new_unchecked(3),
+            clk: Felt::new_unchecked(4),
+            src_ptr: Felt::new_unchecked(5),
+            dst_ptr: Felt::new_unchecked(6),
+            lane_base: Felt::new_unchecked(7),
+            plaintext: [Felt::new_unchecked(8); 4],
+            keystream: [Felt::new_unchecked(9); 8],
+            ciphertext: [Felt::new_unchecked(10); 8],
+        });
+        assert_round_trip(replay);
+    }
+
+    #[test]
+    fn eidos_hasher_replay_variants_round_trip() {
+        let compression = HasherOp::Compress([Felt::new_unchecked(11); STATE_WIDTH]);
+        assert_eq!(compression.to_bytes()[0], 0, "compression replay tag is wire-pinned");
+
+        for op in [
+            compression,
+            HasherOp::AeadXof(
+                ContextId::root(),
+                RowIndex::from(12u32),
+                [Felt::new_unchecked(13); STATE_WIDTH],
+            ),
+        ] {
+            assert_round_trip(op);
+        }
+
+        let mut replay = HasherResponseReplay::default();
+        replay.record_compression(Felt::new_unchecked(14), [Felt::new_unchecked(15); STATE_WIDTH]);
+        assert_round_trip(replay);
     }
 }

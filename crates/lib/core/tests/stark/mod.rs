@@ -1742,7 +1742,7 @@ fn quotient_recomposition_constants_match_derivation() {
         .expect("the Miden AIR set is non-empty");
     let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
-        miden_air::config::pcs_params().log_blowup(),
+        config::pcs_params().log_blowup(),
     )
     .expect("the Miden quotient degree fits its PCS blowup");
 

@@ -57,9 +57,7 @@ pub fn enforce_aead_stream_constraints<AB>(
         .when(selectors.bitwise.next_is_first.clone() * stream_next.clone())
         .assert_one(phases[7].clone());
 
-    builder
-        .when(stream.clone().not() * stream_next.clone())
-        .assert_one(phases[7].clone());
+    builder.when(stream.not() * stream_next.clone()).assert_one(phases[7].clone());
 
     builder.when(stream.clone() * phases[7].clone().not()).assert_one(stream_next);
 
