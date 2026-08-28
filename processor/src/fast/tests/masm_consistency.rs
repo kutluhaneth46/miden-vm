@@ -209,10 +209,9 @@ use super::*;
 // ---- log deferred ops --------------------------------
 // Drift marker only: this snapshot guards the `log_deferred` deferred-root output against
 // silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
-// Stack: [1, 2, 3, 4, 0, 0, 0, 0] with 1 at top; TRUE_DIGEST is at offsets 4..8.
+// TRUE_DIGEST is the zero word at the top of the stack.
 #[case(None, "begin log_deferred end",
-    vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
-         ZERO, ZERO, ZERO, ZERO],
+    vec![ZERO; 8],
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected
@@ -373,12 +372,13 @@ fn test_masm_errors_consistency(
 fn test_log_deferred_correctness() {
     use miden_core::{chiplets::eidos_compression, deferred::TRUE_DIGEST};
 
-    // The opcode reads STMNT from stack[4..8] and writes STATE_NEW to stack[0..4].
+    // The opcode replaces STMNT at stack[0..4] with STATE_NEW.
     // `log_deferred` only accepts a registered statement that evaluates to TRUE. The framework
     // TRUE node is implicitly registered by every processor, so it is the minimal valid fixture
     // for testing the constrained root transition directly.
-    let mut stack_inputs = [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12].map(Felt::new_unchecked);
-    stack_inputs[4..8].copy_from_slice(TRUE_DIGEST.as_elements());
+    let mut stack_inputs =
+        [0, 0, 0, 0, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map(Felt::new_unchecked);
+    stack_inputs[0..4].copy_from_slice(TRUE_DIGEST.as_elements());
     let stmnt = TRUE_DIGEST;
     let state_prev = Word::empty();
 
@@ -406,10 +406,16 @@ fn test_log_deferred_correctness() {
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
     let actual_state_new = execution_output.stack.get_word(0).unwrap();
-    let actual_stmnt = execution_output.stack.get_word(4).unwrap();
 
     assert_eq!(expected_state_new, actual_state_new, "STATE_NEW mismatch");
-    assert_eq!(stmnt, actual_stmnt, "STMNT should be preserved by the opcode");
+    for (offset, expected) in stack_inputs[4..].iter().enumerate() {
+        assert_eq!(
+            execution_output.stack.get_element(offset + 4),
+            Some(*expected),
+            "stack tail changed at position {}",
+            offset + 4
+        );
+    }
 }
 
 // Workaround to make insta and rstest work together.

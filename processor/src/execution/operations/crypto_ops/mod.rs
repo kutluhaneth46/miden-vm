@@ -478,19 +478,18 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 /// Folds a precomputed statement digest into the rolling deferred root.
 ///
 /// Stack transition:
-/// `[_, STMNT, ...] -> [STATE_NEW, STMNT, ...]`
+/// `[STMNT, ...] -> [STATE_NEW, ...]`
 ///
 /// - Hasher computes `Eidos::compress(DEFERRED_AND_INIT_CV, STATE_PREV || STMNT)`; `STATE_NEW` is
 ///   the output chaining value.
 /// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
 ///   helper registers.
-/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with COMPRESS.
 #[inline(always)]
 pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    let statement_digest: Word = processor.stack().get_word(4);
+    let statement_digest: Word = processor.stack().get_word(0);
     let state_prev = processor.system().deferred_root();
 
     // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].

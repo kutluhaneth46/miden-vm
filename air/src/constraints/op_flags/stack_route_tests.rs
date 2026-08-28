@@ -179,7 +179,7 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
             set(&mut no_shift, 0..8);
             set(&mut no_shift, 12..16);
         },
-        opcodes::LOGDEFERRED => set(&mut no_shift, 12..16),
+        opcodes::LOGDEFERRED => set(&mut no_shift, 4..16),
         opcodes::MSTREAM | opcodes::PIPE => {
             set(&mut no_shift, 8..12);
             set(&mut no_shift, 13..16);

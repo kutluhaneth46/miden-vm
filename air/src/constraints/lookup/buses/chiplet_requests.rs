@@ -608,7 +608,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- LOGDEFERRED ---
                     //
-                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), AND_INIT_CV]`.
+                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[0..4]), AND_INIT_CV]`.
                     // The response returns only the new rolling root.
                     g.batch(
                         "logdeferred",

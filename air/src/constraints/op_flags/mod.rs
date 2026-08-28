@@ -367,7 +367,7 @@ where
         // +U32ADD +U32SUB +U32MUL +U32DIV - consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
 
-        let no_shift_depth4 = E::sum_array::<6>(&[
+        let no_shift_depth4 = E::sum_array::<7>(&[
             // +MOVUP3|MOVDN3  - permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC - overwrite s0..s3 in place
@@ -380,6 +380,8 @@ where
             op7(opcodes::EXT2MUL),
             // +MRUPDATE       - Merkle root update on s0..s3
             op4(opcodes::MRUPDATE),
+            // +LOGDEFERRED    - replaces only the top word
+            op5(opcodes::LOGDEFERRED),
         ]);
 
         let swapw2 = op7(opcodes::SWAPW2);
@@ -410,8 +412,6 @@ where
             - swapw3
             // +COMPRESS     - preserves the stack tail above the CV
             + op5(opcodes::COMPRESS)
-            // +LOGDEFERRED   - writes only s0..s11
-            + op5(opcodes::LOGDEFERRED)
             // -PIPE|MSTREAM - cursor at s12 is updated
             - stream_word.clone();
 

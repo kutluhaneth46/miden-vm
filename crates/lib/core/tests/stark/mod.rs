@@ -117,7 +117,8 @@ fn stark_verifier_e2f4_with_max_kernel() {
 
 #[test]
 fn stark_verifier_e2f4_with_deferred_root() {
-    let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    let data =
+        generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, log_deferred_stack_inputs(), None);
     run_recursive_verifier(&data);
 }
 
@@ -731,7 +732,8 @@ fn request_flow_binds_proof_to_claim() {
     // claim — the advice provider cannot pass off another proof. The intended claim's own
     // content-addressed entries stay available so the kernel-witness fetch succeeds and
     // rejection happens in verification, not because of a missing key.
-    let other = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    let other =
+        generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, log_deferred_stack_inputs(), None);
     let (k, v) = entry(&other.proof_stream);
     let mut advice_map = other.advice_map.clone();
     advice_map.extend(intended.advice_map.iter().cloned());
@@ -1094,13 +1096,21 @@ const EXAMPLE_FIB_KERNEL_LARGE: &str = "begin
 
 const EXAMPLE_LOG_DEFERRED: &str = "begin
         log_deferred
-        dropw dropw dropw
+        dropw
     end";
 
 fn fib_stack_inputs() -> Vec<u64> {
     let mut inputs = vec![0_u64; 16];
     inputs[15] = 0;
     inputs[14] = 1;
+    inputs
+}
+
+fn log_deferred_stack_inputs() -> Vec<u64> {
+    // TRUE_DIGEST is the zero word and must occupy the top four positions. A nonzero first tail
+    // element makes the post-`dropw` output visibly distinct from an empty stack.
+    let mut inputs = vec![0_u64; 16];
+    inputs[4] = 7;
     inputs
 }
 

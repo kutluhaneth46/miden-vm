@@ -45,20 +45,15 @@ pub mod log_deferred {
     // STACK LAYOUT (TOP OF STACK)
     // --------------------------------------------------------------------------------------------
     //
-    // The opcode reads STMNT from `stack[4..8]` and writes the new transcript state to
-    // `stack_next[0..4]`.
+    // The opcode reads STMNT from `stack[0..4]` and replaces it with the new transcript state.
     //
-    //   Input  (current row): `[_, STMNT, _, ...]`
-    //     - stack[4..8] = STMNT, the per-call statement word.
-    //   Output (next row):    `[STATE_NEW, STMNT, ...]`
+    //   Input  (current row): `[STMNT, ...]`
+    //     - stack[0..4] = STMNT, the per-call statement word.
+    //   Output (next row):    `[STATE_NEW, ...]`
     //     - stack[0..4] = STATE_NEW.
-    //
-    // STMNT sits at stack[4..8] so the chiplet bus's beta^6..beta^9 products
-    // coincide with COMPRESS's high-block-word products. `beta^k * stack[4..7]` is
-    // computed once and reused.
 
     /// Stack range containing the precomputed statement word on opcode entry.
-    pub const STACK_STMNT_RANGE: Range<usize> = Hasher::BLOCK_HI_RANGE;
+    pub const STACK_STMNT_RANGE: Range<usize> = Hasher::BLOCK_LO_RANGE;
     /// Stack range that receives the new transcript state on opcode exit.
     pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::BLOCK_LO_RANGE;
 }

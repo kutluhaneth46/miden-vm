@@ -225,17 +225,11 @@ end
 #! Folds a deferred node digest into the rolling deferred root using `log_deferred`.
 #! The digest must reference a node that will reduce to TRUE under the installed precompiles.
 #!
-#! Pads the operand stack so `log_deferred`'s implicit `[_, STMNT, _, ...]` shape sees
-#! NODE_DIGEST at stack[4..8] (the second Eidos input word). The opcode folds under the registered
-#! `DEFERRED_AND_DOMAIN`, replacing the top word with the new root while preserving the other two;
-#! this helper then drops all three temporary words.
+#! The opcode replaces NODE_DIGEST with the updated deferred root, which this helper drops.
 #!
 #! Input:  [NODE_DIGEST, ...]
 #! Output: `[...]` (the deferred commitment root advances; node is folded in)
 pub proc log_deferred
-    padw padw movdnw.2
-    # => [_, NODE_DIGEST, _, ...]
     log_deferred
-    # => [STATE_NEW, NODE_DIGEST, 0w, ...]
-    dropw dropw dropw
+    dropw
 end

@@ -415,12 +415,10 @@ authenticates the final root as one public value.
 
 ### Operation Overview
 
-The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
-4..8 (the second Eidos compression block word). Stack slots 0..4 and 8..12 are unreferenced by any
-constraint on opcode entry. `STMNT` must already be present in the processor's deferred state and
-evaluate to `TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and
-precompile support code wrap this low-level opcode by registering nodes and logging statement
-digests.
+The stack is expected to be arranged as `[STMNT, ...]`. `STMNT` must already be present in the
+processor's deferred state and evaluate to `TRUE`; otherwise execution fails when the opcode
+attempts to log it. Core-library and precompile support code wrap this low-level opcode by
+registering nodes and logging statement digests.
 
 Additionally, the processor maintains a persistent rolling deferred root that is updated with each
 `LOG_DEFERRED` invocation. The previous root is provided non‑deterministically via helper
@@ -431,14 +429,12 @@ the stack transition, while the deferred state enforces that the logged statemen
 The operation has the following stack transition:
 
 ```
-Before:  [_,        STMNT, _, ...]
-After:   [ROOT_NEW, STMNT, _, ...]
+Before:  [STMNT,    ...]
+After:   [ROOT_NEW, ...]
 ```
 
-`STMNT` placement in the second block word lets its lookup encoding share Eidos compression message
-products.
-Only stack slots 0..4 are replaced with `ROOT_NEW`; the statement and the remaining stack slots are
-preserved. Wrappers usually drop the three temporary words after the opcode.
+The top word is replaced with `ROOT_NEW`; the remaining stack is preserved. Wrappers usually drop
+`ROOT_NEW` after the opcode.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
@@ -458,7 +454,7 @@ elements appearing on the bus are:
 $$
 \begin{aligned}
 \mathsf{ROOT}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
-\mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
+\mathsf{STMNT}_i               &= s_i         &&\text{(stack slots 0..3)}\\
 \mathsf{CV}_i                  &= \mathsf{DEFERRED\_AND\_INIT\_CV}_i
 &&\text{(registered Eidos chaining value)}
 \end{aligned}

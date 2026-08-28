@@ -405,32 +405,6 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests ops that overwrite the top three words and preserve the tail.
-#[test]
-fn composite_hash_state_tail_flags() {
-    for opcode in [opcodes::LOGDEFERRED] {
-        let op_flags = op_flags_for_opcode(opcode.into());
-
-        for i in 0..12 {
-            assert_eq!(
-                op_flags.no_shift_at(i),
-                ZERO,
-                "no_shift_at({i}) should be ZERO for opcode {opcode}"
-            );
-        }
-        for i in 12..16 {
-            assert_eq!(
-                op_flags.no_shift_at(i),
-                ONE,
-                "no_shift_at({i}) should be ONE for opcode {opcode}"
-            );
-        }
-
-        assert_eq!(op_flags.right_shift(), ZERO, "right_shift should be ZERO for opcode {opcode}");
-        assert_eq!(op_flags.left_shift(), ZERO, "left_shift should be ZERO for opcode {opcode}");
-    }
-}
-
 /// Tests COMPRESS, which preserves the block and tail while updating the CV.
 #[test]
 fn composite_compress_flags() {
@@ -466,20 +440,19 @@ fn composite_caller_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite flags for LOGDEFERRED (hasher output rewrites positions 0..12, no shift from
-/// position 12 onwards).
+/// Tests composite flags for LOGDEFERRED (the top word is replaced and the tail is preserved).
 #[test]
 fn composite_log_deferred_flags() {
     let op_flags = op_flags_for_opcode(opcodes::LOGDEFERRED.into());
 
-    for i in 0..12 {
+    for i in 0..4 {
         assert_eq!(
             op_flags.no_shift_at(i),
             ZERO,
             "no_shift_at({i}) should be ZERO for LOGDEFERRED"
         );
     }
-    for i in 12..16 {
+    for i in 4..16 {
         assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOGDEFERRED");
     }
 

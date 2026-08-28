@@ -396,9 +396,8 @@ mod prover_api_lifecycle {
                  dropw dropw\n\
                  swapw padw swapw compress\n\
                  dropw dropw\n\
-                 padw padw movdnw.2\n\
                  log_deferred\n\
-                 dropw dropw dropw\n\
+                 dropw\n\
              end",
             word_literal(value_digest),
             word_literal(value_digest),

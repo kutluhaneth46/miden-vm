@@ -46,7 +46,7 @@ modules are currently internal implementation detail used by core-library facade
    `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
    relate that advice to values established independently of it, then log a statement digest that
    bundled hydration can re-evaluate before precompile proving.
-4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
+4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at the top of the stack.
    `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. One constrained
    Eidos compression computes
    `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
@@ -78,9 +78,8 @@ Proving, verification, transport, and resource policy are specified in the
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
   - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
     encode a pair count in tag arguments must check the actual payload length during evaluation.
-- `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, STMNT, _, ...]` where `STMNT`
-  occupies stack offsets `4..8`. Only the top word is replaced; wrappers usually drop all three
-  temporary words after the root transition has been constrained.
+- `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
+  `ROOT_NEW` after the root transition has been constrained.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 
