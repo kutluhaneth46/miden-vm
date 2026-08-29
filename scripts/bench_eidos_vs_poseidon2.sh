@@ -573,13 +573,15 @@ fn main() {
     assert!(repeats > 0);
 
     let source = fs::read_to_string(&path).expect("read MASM fixture");
-    let (required, forbidden) = if protocol == "eidos" {
-        ("compress", "hperm")
+    let has_line = |opcode: &str| source.lines().any(|line| line.trim() == opcode);
+    if protocol == "eidos" {
+        assert!(has_line("compress"));
+        assert!(!has_line("hperm"));
+        assert!(!has_line("bcompress"));
     } else {
-        ("hperm", "compress")
-    };
-    assert!(source.lines().any(|line| line.trim() == required));
-    assert!(!source.lines().any(|line| line.trim() == forbidden));
+        assert!(has_line("hperm") || has_line("bcompress"));
+        assert!(!has_line("compress"));
+    }
     let program = Assembler::default()
         .assemble_program("synthetic_benchmark", source)
         .expect("assemble fixture")
@@ -688,11 +690,10 @@ for worktree in "$P2_ROOT" "$EIDOS_ROOT"; do
 done
 
 logical_hash_calls() {
-  local opcode="$1"
-  local path="$2"
+  local path="$1"
   perl -ne '
     $repeat = $1 if /^\s*repeat\.(\d+)\s*$/;
-    if (/^\s*'"$opcode"'\s*$/) {
+    if (/^\s*(hperm|bcompress)\s*$/) {
       die "native-hash opcode is not directly inside repeat.N\n" unless defined $repeat;
       $calls += $repeat;
       undef $repeat;
@@ -701,16 +702,29 @@ logical_hash_calls() {
   ' "$path"
 }
 
+write_eidos_fixture() {
+  local source_path="$1" eidos_path="$2"
+  perl -pe 's/\b(hperm|bcompress)\b/compress/g' "$source_path" > "$eidos_path"
+}
+
+assert_only_native_hash_changed() {
+  local source_path="$1" eidos_path="$2" label="$3"
+  local source_norm="$RUN_DIR/fixtures/source-normalized.masm"
+  local eidos_norm="$RUN_DIR/fixtures/eidos-normalized.masm"
+  perl -pe 's/\b(hperm|bcompress)\b/__NATIVE_HASH__/g' "$source_path" > "$source_norm"
+  perl -pe 's/(?<![A-Za-z0-9_])compress(?![A-Za-z0-9_])/__NATIVE_HASH__/g' \
+    "$eidos_path" > "$eidos_norm"
+  cmp -s "$source_norm" "$eidos_norm" ||
+    die "$label fixture changed beyond native hash opcode normalization"
+  rm -f "$source_norm" "$eidos_norm"
+}
+
 for index in "${!FILES[@]}"; do
   source_path="$FIXTURE_ROOT/${FILES[$index]}"
   eidos_path="$EIDOS_FIXTURES/${FILES[$index]}"
-  reverse_path="$RUN_DIR/fixtures/reversed.masm"
-  perl -pe 's/\bhperm\b/compress/g' "$source_path" > "$eidos_path"
-  perl -pe 's/(?<![A-Za-z0-9_])compress(?![A-Za-z0-9_])/hperm/g' "$eidos_path" > "$reverse_path"
-  cmp -s "$source_path" "$reverse_path" ||
-    die "fixture ${FILES[$index]} changed beyond hperm -> compress"
+  write_eidos_fixture "$source_path" "$eidos_path"
+  assert_only_native_hash_changed "$source_path" "$eidos_path" "${FILES[$index]}"
 done
-rm -f "$RUN_DIR/fixtures/reversed.masm"
 
 RECURSIVE_FIXTURE_INDEXES=(0)
 if [[ "$MODE" == "full" ]]; then
@@ -720,14 +734,10 @@ for index in "${RECURSIVE_FIXTURE_INDEXES[@]}"; do
   auth="${RECURSIVE_LABELS[$index]}"
   fixture="${RECURSIVE_FILES[$index]}"
   eidos_fixture="$EIDOS_FIXTURES/$fixture"
-  reverse_fixture="$RUN_DIR/fixtures/reversed-recursive-$auth.masm"
   if [[ ! -f "$eidos_fixture" ]]; then
-    perl -pe 's/\bhperm\b/compress/g' "$FIXTURE_ROOT/$fixture" > "$eidos_fixture"
+    write_eidos_fixture "$FIXTURE_ROOT/$fixture" "$eidos_fixture"
   fi
-  perl -pe 's/(?<![A-Za-z0-9_])compress(?![A-Za-z0-9_])/hperm/g' "$eidos_fixture" > "$reverse_fixture"
-  cmp -s "$FIXTURE_ROOT/$fixture" "$reverse_fixture" ||
-    die "recursive $auth fixture changed beyond hperm -> compress"
-  rm "$reverse_fixture"
+  assert_only_native_hash_changed "$FIXTURE_ROOT/$fixture" "$eidos_fixture" "recursive $auth"
 done
 
 {
@@ -980,7 +990,7 @@ if ((${#FILES[@]} > 0)); then
     delta=$(( eidos_hash - (2 * p2_hash) ))
     (( delta >= -32 && delta <= 32 )) ||
       die "native-hash rows are not approximately 2x for $label"
-    calls="$(logical_hash_calls hperm "$FIXTURE_ROOT/${FILES[$index]}")"
+    calls="$(logical_hash_calls "$FIXTURE_ROOT/${FILES[$index]}")"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$label" "$calls" "$p2_core" "$eidos_core" "$p2_hash" "$eidos_hash" "$delta" \
       >> "$RUN_DIR/trace-checks.tsv"
